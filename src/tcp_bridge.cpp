@@ -134,3 +134,13 @@ void tcpBridge_update() {
     _client.write(resp, resp_total);
     Serial.print("[TCP] Forwarded "); Serial.print(resp_total); Serial.println(" bytes to client.");
 }
+
+// ── Mode support (USB-RS485 bridge) ────────────────────────────────────────
+void tcpBridge_dropClient() {
+    if (_client) _client.stop();
+}
+
+void tcpBridge_rejectPending() {
+    EthernetClient newClient = _server.accept();
+    if (newClient) newClient.stop();
+}

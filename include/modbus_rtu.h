@@ -8,6 +8,10 @@
 // ── Debug ──────────────────────────────────────────────────────────────────
 void printHex(const char* label, const uint8_t* buf, int len);
 
+// Suppress RS485 diagnostics on Serial while the USB-RS485 bridge owns the
+// serial stream (log text would corrupt the binary RTU session).
+void rtu_setQuiet(bool quiet);
+
 // ── CRC-16/Modbus ──────────────────────────────────────────────────────────
 uint16_t crc16(const uint8_t* buf, int len);
 bool     verifyCRC(const uint8_t* buf, int len);

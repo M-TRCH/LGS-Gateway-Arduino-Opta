@@ -3,14 +3,19 @@
 #include "config.h"
 #include "tcp_bridge.h"
 #include "self_test.h"
+#include "usb_bridge.h"
 
 // ── Network identity (values in config.h) ──────────────────────────────────
 static byte      MAC_ADDR[] = NET_MAC_ADDRESS;
 static IPAddress STATIC_IP(NET_STATIC_IP);
 
+// ── Operating mode ─────────────────────────────────────────────────────────
+// false = Modbus TCP gateway (default at boot), true = USB-RS485 bridge.
+static bool usbBridgeMode = false;
+
 // ── Hardware reset ─────────────────────────────────────────────────────────
 static void hardwareReset() {
-    Serial.println("[SYS] Hardware reset...");
+    if (!usbBridgeMode) Serial.println("[SYS] Hardware reset...");
     digitalWrite(MODULE_RELAY_PIN, LOW);
     digitalWrite(LED_RELAY_PIN,    LOW);
     delay(RESET_RELAY_SETTLE_MS);
@@ -23,6 +28,20 @@ static bool buttonPressed(pin_size_t pin) {
     if (digitalRead(pin) != HIGH) return false;
     delay(BTN_DEBOUNCE_MS);
     return digitalRead(pin) == HIGH;
+}
+
+// ── Mode switching (Green button) ──────────────────────────────────────────
+static void enterUsbBridgeMode() {
+    Serial.println("[MODE] USB-RS485 bridge ON — serial logging suspended.");
+    tcpBridge_dropClient();
+    usbBridge_begin();
+    digitalWrite(USB_MODE_LED_PIN, HIGH);
+}
+
+static void leaveUsbBridgeMode() {
+    usbBridge_end();
+    digitalWrite(USB_MODE_LED_PIN, LOW);
+    Serial.println("[MODE] USB-RS485 bridge OFF — TCP gateway resumed.");
 }
 
 // ── Setup ──────────────────────────────────────────────────────────────────
@@ -41,6 +60,7 @@ void setup() {
     pinMode(SW_B_PIN, INPUT);
     pinMode(SW_Y_PIN, INPUT);
     pinMode(SW_W_PIN, INPUT);
+    pinMode(USB_MODE_LED_PIN, OUTPUT); digitalWrite(USB_MODE_LED_PIN, LOW);
 
     Serial.println("[INIT] Configuring RS485...");
     RS485.setDelays(RS485_PRE_DELAY_US, RS485_POST_DELAY_US);
@@ -59,10 +79,26 @@ void setup() {
 
 // ── Loop ───────────────────────────────────────────────────────────────────
 void loop() {
+    // Green button toggles between TCP-gateway and USB-RS485 bridge mode.
+    if (buttonPressed(SW_G_PIN)) {
+        usbBridgeMode = !usbBridgeMode;
+        if (usbBridgeMode) enterUsbBridgeMode();
+        else               leaveUsbBridgeMode();
+        while (digitalRead(SW_G_PIN) == HIGH) delay(10);   // wait for release
+    }
+
+    // White button → hardware reset (available in both modes).
     if (buttonPressed(SW_W_PIN)) {
-        Serial.println("[SW] White — hardware reset.");
+        if (!usbBridgeMode) Serial.println("[SW] White — hardware reset.");
         hardwareReset();
     }
+
+    if (usbBridgeMode) {
+        usbBridge_update();
+        tcpBridge_rejectPending();
+        return;
+    }
+
     if (buttonPressed(SW_R_PIN)) {
         Serial.println("[SW] Red — coil sweep.");
         selfTest_coilSweep();

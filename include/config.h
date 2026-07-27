@@ -19,6 +19,11 @@
 // ── Buttons ────────────────────────────────────────────────────────────────
 #define BTN_DEBOUNCE_MS     50      // ms – press must persist across this gap
 
+// ── USB-RS485 bridge ───────────────────────────────────────────────────────
+#define USB_MODE_LED_PIN    LED_USER  // blue front LED: ON = USB-RS485 bridge mode
+#define USB_FRAME_GAP_MS    10UL      // ms – silence that ends one RTU frame from the USB host
+#define USB_FRAME_MAX_MS    100UL     // ms – hard cap on accumulating a single frame
+
 // ── Serial ─────────────────────────────────────────────────────────────────
 #define SERIAL_BAUD             115200
 

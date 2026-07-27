@@ -28,12 +28,30 @@ The server accepts **one TCP client at a time**; additional connections are refu
 
 | Button | Action |
 |---|---|
-| White (`A4`) | Hardware reset — relays off, 3 s settle, MCU reset |
+| White (`A4`) | Hardware reset — relays off, 3 s settle, MCU reset (works in both modes) |
 | Red (`A0`) | Coil sweep self-test (~10 s; longer if slaves don't respond) |
 | Blue (`A2`) | Extended coil test (~72 s) |
-| Green / Yellow | Not assigned yet |
+| Green (`A1`) | Toggle **USB-RS485 bridge mode** (blue USER LED on = active) |
+| Yellow (`A3`) | Not assigned yet |
 
 Self-tests iterate the module grid rows 1–6 × columns 1–4 with slave ID = `row*10 + col` (e.g. row 2, column 3 → slave 23), writing coil 1004 (sweep) / 1024 (extended). A coil sweep also runs automatically ~2 s after boot. **While a self-test runs, the TCP bridge is not serviced** — clients see no responses until it finishes.
+
+## USB-RS485 bridge mode (Green button)
+
+Turns the Opta into a plain **USB→RS485 Modbus RTU converter**: a PC Modbus master (Modbus Poll, QModMaster, `mbpoll`, pymodbus, …) talks straight to the RS485 modules through the Opta's USB COM port.
+
+Usage:
+
+1. Connect the Opta to the PC via USB-C (the same port used for flashing).
+2. Press **Green** — the blue USER LED turns on and the COM port becomes a pure binary RTU pipe (all serial logging is suspended).
+3. In the PC tool select the Opta COM port, mode **RTU**, any baud/parity (USB CDC ignores them — the RS485 side always runs at `RS485_BAUD`), and poll the slaves directly.
+4. Press **Green** again to return to TCP-gateway mode (USER LED off). The device always boots in TCP-gateway mode.
+
+Behavior while the mode is active:
+
+- The TCP gateway is suspended: the active client is dropped and new connections are closed immediately.
+- Requests are forwarded per transaction: a frame ends after 10 ms of serial silence, is CRC-checked (invalid frames are dropped — the master's own retry handles it), sent over RS485, and the reply is returned verbatim. Broadcasts (address 0) produce no reply, as normal.
+- Red/Blue self-tests are disabled; White (hardware reset) still works.
 
 ## Key configuration (`include/config.h`)
 
@@ -43,6 +61,7 @@ Self-tests iterate the module grid rows 1–6 × columns 1–4 with slave ID = `
 | `TIMEOUT_FIRST_BYTE_MS` | 300 | Wait for first byte of the slave reply |
 | `TIMEOUT_INTER_BYTE_MS` | 20 | RTU inter-byte frame gap |
 | `TIMEOUT_TCP_PAYLOAD_MS` | 100 | Wait for fragmented TCP payload |
+| `USB_FRAME_GAP_MS` | 10 | Silence that ends one RTU frame from the USB host |
 | `RTU_BUF_SIZE` / `TCP_BUF_SIZE` | 256 | Frame buffers |
 | `SELFTEST_ROWS` / `SELFTEST_COLS` | 6 / 4 | Module grid size for self-tests |
 
@@ -65,7 +84,8 @@ include/config.h                            All tunables: pins, network identity
 include/modbus_rtu.h + src/modbus_rtu.cpp   RTU transport: CRC-16, transaction with echo-strip, FC05 writeCoil
 include/tcp_bridge.h + src/tcp_bridge.cpp   Modbus TCP server (port 502) and TCP↔RTU re-framing
 include/self_test.h  + src/self_test.cpp    Coil sweep + extended coil test routines
-src/main.cpp                                Setup, button dispatch, hardware reset
+include/usb_bridge.h + src/usb_bridge.cpp   USB→RS485 Modbus RTU passthrough (Green-button mode)
+src/main.cpp                                Setup, button dispatch, mode switching, hardware reset
 ```
 
 ## Publishing to GitHub (when ready)
@@ -92,4 +112,4 @@ Cloned from [`M-TRCH/LGS-Master`](https://github.com/M-TRCH/LGS-Master) branch `
 
 ## สรุปภาษาไทย
 
-เฟิร์มแวร์ **Gateway แปลง Modbus TCP ↔ Modbus RTU** บน Arduino Opta — รับคำสั่ง Modbus TCP ทาง Ethernet (port 502, รับทีละ 1 client) แล้วส่งต่อไปยังโมดูลบนบัส RS485 (9600 baud) โดยแปลง frame ให้อัตโนมัติ ปุ่มหน้าเครื่อง: ขาว = รีเซ็ตฮาร์ดแวร์, แดง = ทดสอบ coil sweep, น้ำเงิน = ทดสอบแบบยาว (ระหว่างทดสอบ bridge จะหยุดรับ TCP ชั่วคราว) หลังบูต ~2 วินาทีจะรัน coil sweep อัตโนมัติหนึ่งรอบ build/upload ด้วย PlatformIO
+เฟิร์มแวร์ **Gateway แปลง Modbus TCP ↔ Modbus RTU** บน Arduino Opta — รับคำสั่ง Modbus TCP ทาง Ethernet (port 502, รับทีละ 1 client) แล้วส่งต่อไปยังโมดูลบนบัส RS485 (9600 baud) โดยแปลง frame ให้อัตโนมัติ ปุ่มหน้าเครื่อง: ขาว = รีเซ็ตฮาร์ดแวร์, แดง = ทดสอบ coil sweep, น้ำเงิน = ทดสอบแบบยาว (ระหว่างทดสอบ bridge จะหยุดรับ TCP ชั่วคราว), เขียว = สลับโหมด **USB-RS485 bridge** ให้คอมพิวเตอร์ส่ง Modbus RTU ตรงผ่าน COM port ไปยังโมดูลบน RS485 ได้เลย (ไฟ USER สีน้ำเงินติด = อยู่ในโหมดนี้ และ TCP gateway จะพักชั่วคราว) หลังบูต ~2 วินาทีจะรัน coil sweep อัตโนมัติหนึ่งรอบ build/upload ด้วย PlatformIO

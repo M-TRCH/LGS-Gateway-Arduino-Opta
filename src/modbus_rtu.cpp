@@ -1,5 +1,9 @@
 #include "modbus_rtu.h"
 
+static bool _quiet = false;
+
+void rtu_setQuiet(bool quiet) { _quiet = quiet; }
+
 // ── Debug ──────────────────────────────────────────────────────────────────
 void printHex(const char* label, const uint8_t* buf, int len) {
     Serial.print("[DBG] ");
@@ -40,7 +44,7 @@ int rtu_transact(const uint8_t* tx, int tx_len, uint8_t* rx) {
     // Flush stale RX bytes before transmitting
     int flushed = 0;
     while (RS485.available() && flushed < RTU_BUF_SIZE) { RS485.read(); flushed++; }
-    if (flushed > 0) {
+    if (flushed > 0 && !_quiet) {
         Serial.print("[RS485] Pre-TX flush: discarded ");
         Serial.print(flushed);
         Serial.println(" stale bytes.");

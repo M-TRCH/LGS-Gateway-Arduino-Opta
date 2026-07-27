@@ -11,4 +11,11 @@ void tcpBridge_init(byte* mac, const IPAddress& ip);
 // Call every loop() iteration.
 void tcpBridge_update();
 
+// Drop the active client, if any. Used when leaving TCP-gateway mode.
+void tcpBridge_dropClient();
+
+// Accept and immediately close any pending connection, silently.
+// Call instead of tcpBridge_update() while the USB-RS485 bridge is active.
+void tcpBridge_rejectPending();
+
 #endif // TCP_BRIDGE_H

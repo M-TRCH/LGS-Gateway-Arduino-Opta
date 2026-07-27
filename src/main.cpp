@@ -18,7 +18,7 @@ static bool usbBridgeMode = (USB_BRIDGE_ON_BOOT != 0);
 
 // ── Hardware reset ─────────────────────────────────────────────────────────
 static void hardwareReset() {
-    if (!usbBridgeMode) Serial.println("[SYS] Hardware reset...");
+    if (!usbBridgeMode) LOG_SERIAL.println("[SYS] Hardware reset...");
     digitalWrite(MODULE_RELAY_PIN, LOW);
     digitalWrite(LED_RELAY_PIN,    LOW);
     delay(RESET_RELAY_SETTLE_MS);
@@ -35,7 +35,7 @@ static bool buttonPressed(pin_size_t pin) {
 
 // ── Mode switching (Green button) ──────────────────────────────────────────
 static void enterUsbBridgeMode() {
-    Serial.println("[MODE] USB-RS485 bridge ON — serial logging suspended.");
+    LOG_SERIAL.println("[MODE] USB-RS485 bridge ON — serial logging suspended.");
     tcpBridge_dropClient();
     usbBridge_begin();
     digitalWrite(USB_MODE_LED_PIN, HIGH);
@@ -44,7 +44,7 @@ static void enterUsbBridgeMode() {
 static void leaveUsbBridgeMode() {
     usbBridge_end();
     digitalWrite(USB_MODE_LED_PIN, LOW);
-    Serial.println("[MODE] USB-RS485 bridge OFF — TCP gateway resumed.");
+    LOG_SERIAL.println("[MODE] USB-RS485 bridge OFF — TCP gateway resumed.");
 }
 
 #endif // PANEL_BUTTONS_ENABLED
@@ -53,10 +53,10 @@ static void leaveUsbBridgeMode() {
 void setup() {
     Serial.begin(SERIAL_BAUD);
     delay(500);
-    Serial.println("========================================");
-    Serial.println("  Modbus TCP-RTU Gateway");
-    Serial.println("  Board: Arduino Opta");
-    Serial.println("========================================");
+    LOG_SERIAL.println("========================================");
+    LOG_SERIAL.println("  Modbus TCP-RTU Gateway");
+    LOG_SERIAL.println("  Board: Arduino Opta");
+    LOG_SERIAL.println("========================================");
 
     pinMode(MODULE_RELAY_PIN, OUTPUT); digitalWrite(MODULE_RELAY_PIN, HIGH);
     pinMode(LED_RELAY_PIN,    OUTPUT); digitalWrite(LED_RELAY_PIN,    HIGH);
@@ -69,26 +69,26 @@ void setup() {
 #endif
     pinMode(USB_MODE_LED_PIN, OUTPUT); digitalWrite(USB_MODE_LED_PIN, LOW);
 
-    Serial.println("[INIT] Configuring RS485...");
+    LOG_SERIAL.println("[INIT] Configuring RS485...");
     RS485.setDelays(RS485_PRE_DELAY_US, RS485_POST_DELAY_US);
     RS485.begin(RS485_BAUD);
     RS485.receive();
-    Serial.print("[INIT] RS485 ready @ "); Serial.print(RS485_BAUD); Serial.println(" baud");
+    LOG_SERIAL.print("[INIT] RS485 ready @ "); LOG_SERIAL.print(RS485_BAUD); LOG_SERIAL.println(" baud");
 
     tcpBridge_init(MAC_ADDR, STATIC_IP);
 
     if (usbBridgeMode) {
         // Mode fixed in code: pure USB-RS485 converter from boot.
         // No startup coil sweep — the RS485 bus belongs to the PC master.
-        Serial.println("[MODE] USB-RS485 bridge (fixed in code) — serial logging suspended.");
-        Serial.println("========================================");
+        LOG_SERIAL.println("[MODE] USB-RS485 bridge (fixed in code) — serial logging suspended.");
+        LOG_SERIAL.println("========================================");
         usbBridge_begin();
         digitalWrite(USB_MODE_LED_PIN, HIGH);
         return;
     }
 
-    Serial.println("[INIT] Gateway ONLINE — waiting for connections...");
-    Serial.println("========================================");
+    LOG_SERIAL.println("[INIT] Gateway ONLINE — waiting for connections...");
+    LOG_SERIAL.println("========================================");
 
     delay(STARTUP_SWEEP_DELAY_MS);
     selfTest_coilSweep();
@@ -107,7 +107,7 @@ void loop() {
 
     // White button → hardware reset (available in both modes).
     if (buttonPressed(SW_W_PIN)) {
-        if (!usbBridgeMode) Serial.println("[SW] White — hardware reset.");
+        if (!usbBridgeMode) LOG_SERIAL.println("[SW] White — hardware reset.");
         hardwareReset();
     }
 #endif
@@ -120,11 +120,11 @@ void loop() {
 
 #if PANEL_BUTTONS_ENABLED
     if (buttonPressed(SW_R_PIN)) {
-        Serial.println("[SW] Red — coil sweep.");
+        LOG_SERIAL.println("[SW] Red — coil sweep.");
         selfTest_coilSweep();
     }
     if (buttonPressed(SW_B_PIN)) {
-        Serial.println("[SW] Blue — extended coil test.");
+        LOG_SERIAL.println("[SW] Blue — extended coil test.");
         selfTest_extended();
     }
 #endif

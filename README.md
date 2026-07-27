@@ -61,6 +61,7 @@ Behavior while the mode is active:
 |---|---|---|
 | `PANEL_BUTTONS_ENABLED` | 0 | External buttons ignored while 0 (temporary) |
 | `USB_BRIDGE_ON_BOOT` | 0 | Boot mode while buttons are disabled: 0 = TCP gateway, 1 = USB bridge |
+| `SERIAL_LOG_ENABLED` | 0 | All log output on the USB port compiled out while 0 (temporary) |
 | `RS485_BAUD` | 9600 | RTU bus baud rate |
 | `TIMEOUT_FIRST_BYTE_MS` | 300 | Wait for first byte of the slave reply |
 | `TIMEOUT_INTER_BYTE_MS` | 20 | RTU inter-byte frame gap |
@@ -118,4 +119,4 @@ Cloned from [`M-TRCH/LGS-Master`](https://github.com/M-TRCH/LGS-Master) branch `
 
 เฟิร์มแวร์ **Gateway แปลง Modbus TCP ↔ Modbus RTU** บน Arduino Opta — รับคำสั่ง Modbus TCP ทาง Ethernet (port 502, รับทีละ 1 client) แล้วส่งต่อไปยังโมดูลบนบัส RS485 (9600 baud) โดยแปลง frame ให้อัตโนมัติ ปุ่มหน้าเครื่อง: ขาว = รีเซ็ตฮาร์ดแวร์, แดง = ทดสอบ coil sweep, น้ำเงิน = ทดสอบแบบยาว (ระหว่างทดสอบ bridge จะหยุดรับ TCP ชั่วคราว), เขียว = สลับโหมด **USB-RS485 bridge** ให้คอมพิวเตอร์ส่ง Modbus RTU ตรงผ่าน COM port ไปยังโมดูลบน RS485 ได้เลย (ไฟ USER สีน้ำเงินติด = อยู่ในโหมดนี้ และ TCP gateway จะพักชั่วคราว)
 
-**หมายเหตุ:** ตอนนี้ปุ่มภายนอกถูกปิดใช้งานชั่วคราว (`PANEL_BUTTONS_ENABLED = 0` ใน `include/config.h`) — เลือกโหมดด้วย `USB_BRIDGE_ON_BOOT` (0 = TCP gateway, 1 = USB-RS485 bridge) แล้ว build + upload ใหม่ หลังบูต ~2 วินาทีจะรัน coil sweep อัตโนมัติหนึ่งรอบ build/upload ด้วย PlatformIO
+**หมายเหตุ:** ตอนนี้ปุ่มภายนอกถูกปิดใช้งานชั่วคราว (`PANEL_BUTTONS_ENABLED = 0` ใน `include/config.h`) — เลือกโหมดด้วย `USB_BRIDGE_ON_BOOT` (0 = TCP gateway, 1 = USB-RS485 bridge) แล้ว build + upload ใหม่ และ log ทางช่อง USB ถูกปิดชั่วคราวเช่นกัน (`SERIAL_LOG_ENABLED = 0`) เพื่อให้ COM port เป็นทางเดินข้อมูล RTU ล้วนๆ หลังบูต ~2 วินาทีจะรัน coil sweep อัตโนมัติหนึ่งรอบ build/upload ด้วย PlatformIO

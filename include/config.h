@@ -32,6 +32,16 @@
 
 // ── Serial ─────────────────────────────────────────────────────────────────
 #define SERIAL_BAUD             115200
+#define SERIAL_LOG_ENABLED      0       // 0 = compile out ALL log output on the USB port (temporary)
+
+// Logging proxy: log statements write to LOG_SERIAL so the whole log stream
+// can be compiled out. The USB-RS485 bridge keeps using Serial directly for
+// its binary RTU data. The if/else form is dangling-else-safe.
+#if SERIAL_LOG_ENABLED
+    #define LOG_SERIAL  Serial
+#else
+    #define LOG_SERIAL  if (true) {} else Serial
+#endif
 
 // ── RS485 / Modbus RTU ─────────────────────────────────────────────────────
 #define RS485_BAUD              9600

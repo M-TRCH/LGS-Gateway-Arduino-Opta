@@ -6,17 +6,17 @@ void rtu_setQuiet(bool quiet) { _quiet = quiet; }
 
 // ── Debug ──────────────────────────────────────────────────────────────────
 void printHex(const char* label, const uint8_t* buf, int len) {
-    Serial.print("[DBG] ");
-    Serial.print(label);
-    Serial.print(" (");
-    Serial.print(len);
-    Serial.print(" bytes): ");
+    LOG_SERIAL.print("[DBG] ");
+    LOG_SERIAL.print(label);
+    LOG_SERIAL.print(" (");
+    LOG_SERIAL.print(len);
+    LOG_SERIAL.print(" bytes): ");
     for (int i = 0; i < len; i++) {
-        if (buf[i] < 0x10) Serial.print("0");
-        Serial.print(buf[i], HEX);
-        Serial.print(" ");
+        if (buf[i] < 0x10) LOG_SERIAL.print("0");
+        LOG_SERIAL.print(buf[i], HEX);
+        LOG_SERIAL.print(" ");
     }
-    Serial.println();
+    LOG_SERIAL.println();
 }
 
 // ── CRC-16/Modbus ──────────────────────────────────────────────────────────
@@ -45,9 +45,9 @@ int rtu_transact(const uint8_t* tx, int tx_len, uint8_t* rx) {
     int flushed = 0;
     while (RS485.available() && flushed < RTU_BUF_SIZE) { RS485.read(); flushed++; }
     if (flushed > 0 && !_quiet) {
-        Serial.print("[RS485] Pre-TX flush: discarded ");
-        Serial.print(flushed);
-        Serial.println(" stale bytes.");
+        LOG_SERIAL.print("[RS485] Pre-TX flush: discarded ");
+        LOG_SERIAL.print(flushed);
+        LOG_SERIAL.println(" stale bytes.");
     }
 
     RS485.beginTransmission();
@@ -97,25 +97,25 @@ bool writeCoil(uint8_t slaveId, uint16_t coilAddr, bool value) {
     tx[6] = c & 0xFF;
     tx[7] = (c >> 8) & 0xFF;
 
-    Serial.print("[FC05] WriteCoil → Slave="); Serial.print(slaveId);
-    Serial.print("  Coil="); Serial.print(coilAddr);
-    Serial.print("  Value="); Serial.println(value ? "ON" : "OFF");
+    LOG_SERIAL.print("[FC05] WriteCoil → Slave="); LOG_SERIAL.print(slaveId);
+    LOG_SERIAL.print("  Coil="); LOG_SERIAL.print(coilAddr);
+    LOG_SERIAL.print("  Value="); LOG_SERIAL.println(value ? "ON" : "OFF");
     printHex("FC05 TX", tx, 8);
 
     uint8_t rx[RTU_BUF_SIZE];
     int rx_len = rtu_transact(tx, 8, rx);
 
-    if (rx_len == 0) { Serial.println("[FC05] Timeout — no response.");   return false; }
-    if (rx_len < 8)  { Serial.println("[FC05] Response too short.");       return false; }
+    if (rx_len == 0) { LOG_SERIAL.println("[FC05] Timeout — no response.");   return false; }
+    if (rx_len < 8)  { LOG_SERIAL.println("[FC05] Response too short.");       return false; }
 
     printHex("FC05 RX", rx, rx_len);
 
-    if (!verifyCRC(rx, rx_len)) { Serial.println("[FC05] CRC FAIL.");      return false; }
+    if (!verifyCRC(rx, rx_len)) { LOG_SERIAL.println("[FC05] CRC FAIL.");      return false; }
     if (rx[1] == 0x85) {
-        Serial.print("[FC05] Exception code=0x"); Serial.println(rx[2], HEX);
+        LOG_SERIAL.print("[FC05] Exception code=0x"); LOG_SERIAL.println(rx[2], HEX);
         return false;
     }
 
-    Serial.println("[FC05] WriteCoil OK");
+    LOG_SERIAL.println("[FC05] WriteCoil OK");
     return true;
 }

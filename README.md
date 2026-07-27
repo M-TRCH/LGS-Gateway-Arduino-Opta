@@ -18,8 +18,8 @@ Acts as the network bridge for the LGS module grid, where slaves are addressed b
 
 | Setting | Value | Where to change |
 |---|---|---|
-| Static IP | `192.168.0.178` | `src/main.cpp` (`STATIC_IP`) |
-| MAC address | `DE:AD:BE:EF:FE:ED` | `src/main.cpp` (`MAC_ADDR`) |
+| Static IP | `192.168.0.178` | `include/config.h` (`NET_STATIC_IP`) |
+| MAC address | `DE:AD:BE:EF:FE:ED` | `include/config.h` (`NET_MAC_ADDRESS`) |
 | Modbus TCP port | `502` | `include/config.h` (`MODBUS_TCP_PORT`) |
 
 The server accepts **one TCP client at a time**; additional connections are refused until the active client disconnects.
@@ -42,7 +42,9 @@ Self-tests iterate the module grid rows 1–6 × columns 1–4 with slave ID = `
 | `RS485_BAUD` | 9600 | RTU bus baud rate |
 | `TIMEOUT_FIRST_BYTE_MS` | 300 | Wait for first byte of the slave reply |
 | `TIMEOUT_INTER_BYTE_MS` | 20 | RTU inter-byte frame gap |
+| `TIMEOUT_TCP_PAYLOAD_MS` | 100 | Wait for fragmented TCP payload |
 | `RTU_BUF_SIZE` / `TCP_BUF_SIZE` | 256 | Frame buffers |
+| `SELFTEST_ROWS` / `SELFTEST_COLS` | 6 / 4 | Module grid size for self-tests |
 
 ## Build / upload / monitor
 
@@ -59,10 +61,11 @@ Equivalent VS Code tasks **Build / Upload / Monitor** are predefined in `.vscode
 ## Project structure
 
 ```
-include/config.h                            All tunables: pins, baud rates, timeouts, buffer sizes
+include/config.h                            All tunables: pins, network identity, baud rates, timeouts, self-test grid
 include/modbus_rtu.h + src/modbus_rtu.cpp   RTU transport: CRC-16, transaction with echo-strip, FC05 writeCoil
 include/tcp_bridge.h + src/tcp_bridge.cpp   Modbus TCP server (port 502) and TCP↔RTU re-framing
-src/main.cpp                                Setup, buttons, self-tests, hardware reset
+include/self_test.h  + src/self_test.cpp    Coil sweep + extended coil test routines
+src/main.cpp                                Setup, button dispatch, hardware reset
 ```
 
 ## Publishing to GitHub (when ready)

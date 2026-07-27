@@ -64,7 +64,7 @@ void tcpBridge_update() {
     // ── Wait for full payload (handles TCP fragmentation) ─────────────────
     unsigned long t_tcp = millis();
     while (_client.available() < (int)mbapLen) {
-        if (millis() - t_tcp > 100UL) {
+        if (millis() - t_tcp > TIMEOUT_TCP_PAYLOAD_MS) {
             Serial.print("[ERR] TCP payload timeout — got ");
             Serial.print(_client.available()); Serial.print("/"); Serial.println(mbapLen);
             while (_client.available()) _client.read();

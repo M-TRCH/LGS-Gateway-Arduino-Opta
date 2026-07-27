@@ -1,31 +1,28 @@
-﻿#include <Ethernet.h>
+#include <Ethernet.h>
 #include <ArduinoRS485.h>
 #include "config.h"
-#include "modbus_rtu.h"
 #include "tcp_bridge.h"
+#include "self_test.h"
 
-// ── Network configuration (edit to suit your deployment) ──────────────────
-static byte      MAC_ADDR[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
-static IPAddress STATIC_IP(192, 168, 0, 178);
+// ── Network identity (values in config.h) ──────────────────────────────────
+static byte      MAC_ADDR[] = NET_MAC_ADDRESS;
+static IPAddress STATIC_IP(NET_STATIC_IP);
 
 // ── Hardware reset ─────────────────────────────────────────────────────────
 static void hardwareReset() {
     Serial.println("[SYS] Hardware reset...");
     digitalWrite(MODULE_RELAY_PIN, LOW);
     digitalWrite(LED_RELAY_PIN,    LOW);
-    delay(3000);
+    delay(RESET_RELAY_SETTLE_MS);
     NVIC_SystemReset();
 }
 
-// ── Startup coil sweep (visual self-test) ─────────────────────────────────
-static void coilSweep() {
-    for (int row = 1; row <= 6; row++) {
-        for (int col = 1; col <= 4; col++) {
-            int id = (row * 10) + col;
-            writeCoil(id, 1004, true);  delay(200);
-            writeCoil(id, 1004, false); delay(200);
-        }
-    }
+// ── Buttons ────────────────────────────────────────────────────────────────
+// Pressed = HIGH that persists across the debounce gap.
+static bool buttonPressed(pin_size_t pin) {
+    if (digitalRead(pin) != HIGH) return false;
+    delay(BTN_DEBOUNCE_MS);
+    return digitalRead(pin) == HIGH;
 }
 
 // ── Setup ──────────────────────────────────────────────────────────────────
@@ -56,43 +53,23 @@ void setup() {
     Serial.println("[INIT] Gateway ONLINE — waiting for connections...");
     Serial.println("========================================");
 
-    delay(2000);
-    coilSweep();
+    delay(STARTUP_SWEEP_DELAY_MS);
+    selfTest_coilSweep();
 }
 
 // ── Loop ───────────────────────────────────────────────────────────────────
 void loop() {
-    // White button → hardware reset
-    if (digitalRead(SW_W_PIN) == HIGH) {
-        delay(50);
-        if (digitalRead(SW_W_PIN) == HIGH) {
-            Serial.println("[SW] White — hardware reset.");
-            hardwareReset();
-        }
+    if (buttonPressed(SW_W_PIN)) {
+        Serial.println("[SW] White — hardware reset.");
+        hardwareReset();
     }
-
-    // Red button → coil sweep test
-    if (digitalRead(SW_R_PIN) == HIGH) {
-        delay(50);
-        if (digitalRead(SW_R_PIN) == HIGH) {
-            Serial.println("[SW] Red — coil sweep.");
-            coilSweep();
-        }
+    if (buttonPressed(SW_R_PIN)) {
+        Serial.println("[SW] Red — coil sweep.");
+        selfTest_coilSweep();
     }
-
-    // Blue button → extended coil test
-    if (digitalRead(SW_B_PIN) == HIGH) {
-        delay(50);
-        if (digitalRead(SW_B_PIN) == HIGH) {
-            Serial.println("[SW] Blue — extended coil test.");
-            for (int row = 1; row <= 6; row++) {
-                for (int col = 1; col <= 4; col++) {
-                    int id = (row * 10) + col;
-                    writeCoil(id, 1024, true);  delay(2000);
-                    writeCoil(id, 1004, false); delay(1000);
-                }
-            }
-        }
+    if (buttonPressed(SW_B_PIN)) {
+        Serial.println("[SW] Blue — extended coil test.");
+        selfTest_extended();
     }
 
     tcpBridge_update();

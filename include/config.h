@@ -12,6 +12,13 @@
 #define SW_Y_PIN            A3
 #define SW_W_PIN            A4
 
+// ── Network ────────────────────────────────────────────────────────────────
+#define NET_MAC_ADDRESS     { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED }
+#define NET_STATIC_IP       192, 168, 0, 178    // octets for the IPAddress ctor
+
+// ── Buttons ────────────────────────────────────────────────────────────────
+#define BTN_DEBOUNCE_MS     50      // ms – press must persist across this gap
+
 // ── Serial ─────────────────────────────────────────────────────────────────
 #define SERIAL_BAUD             115200
 
@@ -27,5 +34,19 @@
 #define MODBUS_TCP_PORT     502
 #define TCP_BUF_SIZE        256
 #define MBAP_HEADER_LEN     6
+#define TIMEOUT_TCP_PAYLOAD_MS  100UL   // ms – wait for fragmented TCP payload
+
+// ── System ─────────────────────────────────────────────────────────────────
+#define RESET_RELAY_SETTLE_MS   3000    // ms – relays LOW settle before MCU reset
+#define STARTUP_SWEEP_DELAY_MS  2000    // ms – pause before startup coil sweep
+
+// ── Self-test ──────────────────────────────────────────────────────────────
+#define SELFTEST_ROWS           6       // module grid rows
+#define SELFTEST_COLS           4       // module grid columns
+#define SELFTEST_COIL_PRIMARY   1004    // coil toggled by the sweep test
+#define SELFTEST_COIL_EXTENDED  1024    // coil set ON by the extended test
+#define SELFTEST_SWEEP_STEP_MS  200     // ms – ON/OFF dwell during sweep
+#define SELFTEST_EXT_ON_MS      2000    // ms – extended test ON dwell
+#define SELFTEST_EXT_OFF_MS     1000    // ms – extended test OFF dwell
 
 #endif // CONFIG_H

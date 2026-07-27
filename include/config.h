@@ -16,6 +16,12 @@
 #define NET_MAC_ADDRESS     { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED }
 #define NET_STATIC_IP       192, 168, 0, 178    // octets for the IPAddress ctor
 
+// ── Operating mode ─────────────────────────────────────────────────────────
+// The external panel buttons are temporarily disabled; the operating mode is
+// fixed here at build time — change USB_BRIDGE_ON_BOOT, rebuild, reflash.
+#define PANEL_BUTTONS_ENABLED   0   // 0 = ignore external buttons (temporary)
+#define USB_BRIDGE_ON_BOOT      0   // 0 = Modbus TCP gateway, 1 = USB-RS485 bridge
+
 // ── Buttons ────────────────────────────────────────────────────────────────
 #define BTN_DEBOUNCE_MS     50      // ms – press must persist across this gap
 

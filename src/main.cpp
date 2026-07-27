@@ -10,8 +10,11 @@ static byte      MAC_ADDR[] = NET_MAC_ADDRESS;
 static IPAddress STATIC_IP(NET_STATIC_IP);
 
 // ── Operating mode ─────────────────────────────────────────────────────────
-// false = Modbus TCP gateway (default at boot), true = USB-RS485 bridge.
-static bool usbBridgeMode = false;
+// Fixed at boot by USB_BRIDGE_ON_BOOT while the panel buttons are disabled;
+// the Green button toggles it at runtime when PANEL_BUTTONS_ENABLED is 1.
+static bool usbBridgeMode = (USB_BRIDGE_ON_BOOT != 0);
+
+#if PANEL_BUTTONS_ENABLED
 
 // ── Hardware reset ─────────────────────────────────────────────────────────
 static void hardwareReset() {
@@ -44,6 +47,8 @@ static void leaveUsbBridgeMode() {
     Serial.println("[MODE] USB-RS485 bridge OFF — TCP gateway resumed.");
 }
 
+#endif // PANEL_BUTTONS_ENABLED
+
 // ── Setup ──────────────────────────────────────────────────────────────────
 void setup() {
     Serial.begin(SERIAL_BAUD);
@@ -55,11 +60,13 @@ void setup() {
 
     pinMode(MODULE_RELAY_PIN, OUTPUT); digitalWrite(MODULE_RELAY_PIN, HIGH);
     pinMode(LED_RELAY_PIN,    OUTPUT); digitalWrite(LED_RELAY_PIN,    HIGH);
+#if PANEL_BUTTONS_ENABLED
     pinMode(SW_R_PIN, INPUT);
     pinMode(SW_G_PIN, INPUT);
     pinMode(SW_B_PIN, INPUT);
     pinMode(SW_Y_PIN, INPUT);
     pinMode(SW_W_PIN, INPUT);
+#endif
     pinMode(USB_MODE_LED_PIN, OUTPUT); digitalWrite(USB_MODE_LED_PIN, LOW);
 
     Serial.println("[INIT] Configuring RS485...");
@@ -70,6 +77,16 @@ void setup() {
 
     tcpBridge_init(MAC_ADDR, STATIC_IP);
 
+    if (usbBridgeMode) {
+        // Mode fixed in code: pure USB-RS485 converter from boot.
+        // No startup coil sweep — the RS485 bus belongs to the PC master.
+        Serial.println("[MODE] USB-RS485 bridge (fixed in code) — serial logging suspended.");
+        Serial.println("========================================");
+        usbBridge_begin();
+        digitalWrite(USB_MODE_LED_PIN, HIGH);
+        return;
+    }
+
     Serial.println("[INIT] Gateway ONLINE — waiting for connections...");
     Serial.println("========================================");
 
@@ -79,6 +96,7 @@ void setup() {
 
 // ── Loop ───────────────────────────────────────────────────────────────────
 void loop() {
+#if PANEL_BUTTONS_ENABLED
     // Green button toggles between TCP-gateway and USB-RS485 bridge mode.
     if (buttonPressed(SW_G_PIN)) {
         usbBridgeMode = !usbBridgeMode;
@@ -92,6 +110,7 @@ void loop() {
         if (!usbBridgeMode) Serial.println("[SW] White — hardware reset.");
         hardwareReset();
     }
+#endif
 
     if (usbBridgeMode) {
         usbBridge_update();
@@ -99,6 +118,7 @@ void loop() {
         return;
     }
 
+#if PANEL_BUTTONS_ENABLED
     if (buttonPressed(SW_R_PIN)) {
         Serial.println("[SW] Red — coil sweep.");
         selfTest_coilSweep();
@@ -107,6 +127,7 @@ void loop() {
         Serial.println("[SW] Blue — extended coil test.");
         selfTest_extended();
     }
+#endif
 
     tcpBridge_update();
 }

@@ -26,7 +26,9 @@ The server accepts **one TCP client at a time**; additional connections are refu
 
 ## Front-panel buttons
 
-| Button | Action |
+> **Temporarily disabled** — `PANEL_BUTTONS_ENABLED` is `0` in `include/config.h`, so all buttons below are ignored and the operating mode is fixed at build time by `USB_BRIDGE_ON_BOOT` (`0` = TCP gateway, `1` = USB-RS485 bridge). Set `PANEL_BUTTONS_ENABLED` back to `1` to restore button control.
+
+| Button | Action (when buttons are enabled) |
 |---|---|
 | White (`A4`) | Hardware reset — relays off, 3 s settle, MCU reset (works in both modes) |
 | Red (`A0`) | Coil sweep self-test (~10 s; longer if slaves don't respond) |
@@ -43,9 +45,9 @@ Turns the Opta into a plain **USB→RS485 Modbus RTU converter**: a PC Modbus ma
 Usage:
 
 1. Connect the Opta to the PC via USB-C (the same port used for flashing).
-2. Press **Green** — the blue USER LED turns on and the COM port becomes a pure binary RTU pipe (all serial logging is suspended).
+2. Enter the mode: while buttons are disabled, set `USB_BRIDGE_ON_BOOT` to `1` in `include/config.h` and rebuild + reflash (with buttons enabled, press **Green** instead). The blue USER LED turns on and the COM port becomes a pure binary RTU pipe (all serial logging is suspended; the startup coil sweep is skipped).
 3. In the PC tool select the Opta COM port, mode **RTU**, any baud/parity (USB CDC ignores them — the RS485 side always runs at `RS485_BAUD`), and poll the slaves directly.
-4. Press **Green** again to return to TCP-gateway mode (USER LED off). The device always boots in TCP-gateway mode.
+4. Return to TCP-gateway mode by setting `USB_BRIDGE_ON_BOOT` back to `0` (or, with buttons enabled, pressing **Green** again — in that case the device always boots in TCP-gateway mode).
 
 Behavior while the mode is active:
 
@@ -57,6 +59,8 @@ Behavior while the mode is active:
 
 | Define | Default | Meaning |
 |---|---|---|
+| `PANEL_BUTTONS_ENABLED` | 0 | External buttons ignored while 0 (temporary) |
+| `USB_BRIDGE_ON_BOOT` | 0 | Boot mode while buttons are disabled: 0 = TCP gateway, 1 = USB bridge |
 | `RS485_BAUD` | 9600 | RTU bus baud rate |
 | `TIMEOUT_FIRST_BYTE_MS` | 300 | Wait for first byte of the slave reply |
 | `TIMEOUT_INTER_BYTE_MS` | 20 | RTU inter-byte frame gap |
@@ -112,4 +116,6 @@ Cloned from [`M-TRCH/LGS-Master`](https://github.com/M-TRCH/LGS-Master) branch `
 
 ## สรุปภาษาไทย
 
-เฟิร์มแวร์ **Gateway แปลง Modbus TCP ↔ Modbus RTU** บน Arduino Opta — รับคำสั่ง Modbus TCP ทาง Ethernet (port 502, รับทีละ 1 client) แล้วส่งต่อไปยังโมดูลบนบัส RS485 (9600 baud) โดยแปลง frame ให้อัตโนมัติ ปุ่มหน้าเครื่อง: ขาว = รีเซ็ตฮาร์ดแวร์, แดง = ทดสอบ coil sweep, น้ำเงิน = ทดสอบแบบยาว (ระหว่างทดสอบ bridge จะหยุดรับ TCP ชั่วคราว), เขียว = สลับโหมด **USB-RS485 bridge** ให้คอมพิวเตอร์ส่ง Modbus RTU ตรงผ่าน COM port ไปยังโมดูลบน RS485 ได้เลย (ไฟ USER สีน้ำเงินติด = อยู่ในโหมดนี้ และ TCP gateway จะพักชั่วคราว) หลังบูต ~2 วินาทีจะรัน coil sweep อัตโนมัติหนึ่งรอบ build/upload ด้วย PlatformIO
+เฟิร์มแวร์ **Gateway แปลง Modbus TCP ↔ Modbus RTU** บน Arduino Opta — รับคำสั่ง Modbus TCP ทาง Ethernet (port 502, รับทีละ 1 client) แล้วส่งต่อไปยังโมดูลบนบัส RS485 (9600 baud) โดยแปลง frame ให้อัตโนมัติ ปุ่มหน้าเครื่อง: ขาว = รีเซ็ตฮาร์ดแวร์, แดง = ทดสอบ coil sweep, น้ำเงิน = ทดสอบแบบยาว (ระหว่างทดสอบ bridge จะหยุดรับ TCP ชั่วคราว), เขียว = สลับโหมด **USB-RS485 bridge** ให้คอมพิวเตอร์ส่ง Modbus RTU ตรงผ่าน COM port ไปยังโมดูลบน RS485 ได้เลย (ไฟ USER สีน้ำเงินติด = อยู่ในโหมดนี้ และ TCP gateway จะพักชั่วคราว)
+
+**หมายเหตุ:** ตอนนี้ปุ่มภายนอกถูกปิดใช้งานชั่วคราว (`PANEL_BUTTONS_ENABLED = 0` ใน `include/config.h`) — เลือกโหมดด้วย `USB_BRIDGE_ON_BOOT` (0 = TCP gateway, 1 = USB-RS485 bridge) แล้ว build + upload ใหม่ หลังบูต ~2 วินาทีจะรัน coil sweep อัตโนมัติหนึ่งรอบ build/upload ด้วย PlatformIO

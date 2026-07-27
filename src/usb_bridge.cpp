@@ -34,12 +34,24 @@ void usbBridge_update() {
 
     // Forward only complete, CRC-valid requests (min frame: addr+FC+CRC = 4).
     // Anything else is dropped; the PC master will time out and retry.
-    if (len < 4 || !verifyCRC(frame, len)) return;
+    // (Bench diagnostics below exist only in logging builds; production
+    //  builds compile them out and keep the COM port binary-clean.)
+    if (len < 4 || !verifyCRC(frame, len)) {
+        LOG_SERIAL.print("[USB] dropped invalid frame, len=");
+        LOG_SERIAL.println(len);
+        return;
+    }
+    printHex("USB TX->RS485", frame, len);
 
     uint8_t rx[RTU_BUF_SIZE];
     int rx_len = rtu_transact(frame, len, rx);
 
     // Return the reply verbatim — the PC master does its own CRC check.
     // Broadcasts (addr 0) legitimately produce no reply.
-    if (rx_len > 0) Serial.write(rx, rx_len);
+    if (rx_len > 0) {
+        printHex("RS485->USB", rx, rx_len);
+        Serial.write(rx, rx_len);
+    } else {
+        LOG_SERIAL.println("[USB] no reply from RS485");
+    }
 }

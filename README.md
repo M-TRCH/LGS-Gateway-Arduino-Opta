@@ -51,7 +51,7 @@ Usage:
 
 Behavior while the mode is active:
 
-- The TCP gateway is suspended: the active client is dropped and new connections are closed immediately.
+- The TCP gateway is suspended: the active client is dropped and new connections are closed immediately. In build-time USB-bridge builds (`USB_BRIDGE_ON_BOOT 1`) TCP/Ethernet is **fully disabled** — `Ethernet.begin()` on the mbed core blocks forever when no LAN cable is attached, so USB-bridge builds must never touch it.
 - Requests are forwarded per transaction: a frame ends after 10 ms of serial silence, is CRC-checked (invalid frames are dropped — the master's own retry handles it), sent over RS485, and the reply is returned verbatim. Broadcasts (address 0) produce no reply, as normal.
 - Red/Blue self-tests are disabled; White (hardware reset) still works.
 

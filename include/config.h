@@ -20,7 +20,7 @@
 // The external panel buttons are temporarily disabled; the operating mode is
 // fixed here at build time — change USB_BRIDGE_ON_BOOT, rebuild, reflash.
 #define PANEL_BUTTONS_ENABLED   0   // 0 = ignore external buttons (temporary)
-#define USB_BRIDGE_ON_BOOT      0   // 0 = Modbus TCP gateway, 1 = USB-RS485 bridge
+#define USB_BRIDGE_ON_BOOT      1   // 0 = Modbus TCP gateway, 1 = USB-RS485 bridge (TCP/Ethernet fully disabled)
 
 // ── Buttons ────────────────────────────────────────────────────────────────
 #define BTN_DEBOUNCE_MS     50      // ms – press must persist across this gap

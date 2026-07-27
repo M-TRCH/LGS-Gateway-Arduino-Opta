@@ -6,8 +6,10 @@
 #include "usb_bridge.h"
 
 // ── Network identity (values in config.h) ──────────────────────────────────
+#if !USB_BRIDGE_ON_BOOT
 static byte      MAC_ADDR[] = NET_MAC_ADDRESS;
 static IPAddress STATIC_IP(NET_STATIC_IP);
+#endif
 
 // ── Operating mode ─────────────────────────────────────────────────────────
 // Fixed at boot by USB_BRIDGE_ON_BOOT while the panel buttons are disabled;
@@ -75,7 +77,11 @@ void setup() {
     RS485.receive();
     LOG_SERIAL.print("[INIT] RS485 ready @ "); LOG_SERIAL.print(RS485_BAUD); LOG_SERIAL.println(" baud");
 
+#if !USB_BRIDGE_ON_BOOT
+    // Ethernet.begin() blocks until link-up on the mbed core — never call it
+    // in USB-bridge builds, which must run with no LAN cable attached.
     tcpBridge_init(MAC_ADDR, STATIC_IP);
+#endif
 
     if (usbBridgeMode) {
         // Mode fixed in code: pure USB-RS485 converter from boot.
@@ -96,6 +102,14 @@ void setup() {
 
 // ── Loop ───────────────────────────────────────────────────────────────────
 void loop() {
+#if SERIAL_LOG_ENABLED
+    // Debug-build liveness heartbeat (absent from production: logs compiled out).
+    static unsigned long t_hb = 0;
+    if (millis() - t_hb >= 5000UL) {
+        t_hb = millis();
+        LOG_SERIAL.println("[SYS] alive");
+    }
+#endif
 #if PANEL_BUTTONS_ENABLED
     // Green button toggles between TCP-gateway and USB-RS485 bridge mode.
     if (buttonPressed(SW_G_PIN)) {
@@ -114,7 +128,9 @@ void loop() {
 
     if (usbBridgeMode) {
         usbBridge_update();
-        tcpBridge_rejectPending();
+#if !USB_BRIDGE_ON_BOOT
+        tcpBridge_rejectPending();   // TCP server exists only in TCP-boot builds
+#endif
         return;
     }
 

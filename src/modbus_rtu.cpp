@@ -1,11 +1,21 @@
 #include "modbus_rtu.h"
 
-static bool _quiet = false;
+// Runtime log gate for the whole firmware (config.h declares it extern).
+// Default OFF: the USB port must carry nothing but Modbus and console traffic
+// unless someone deliberately turns logging on with `$LGS SET sys.log=1`.
+bool g_logEnabled = false;
 
-void rtu_setQuiet(bool quiet) { _quiet = quiet; }
+static uint16_t _t_first_ms = DEF_TIMEOUT_FIRST_BYTE_MS;
+static uint16_t _t_inter_ms = DEF_TIMEOUT_INTER_BYTE_MS;
+
+void rtu_setTimeouts(uint16_t firstByteMs, uint16_t interByteMs) {
+    _t_first_ms = firstByteMs;
+    _t_inter_ms = interByteMs;
+}
 
 // ── Debug ──────────────────────────────────────────────────────────────────
 void printHex(const char* label, const uint8_t* buf, int len) {
+    if (!g_logEnabled) return;              // skip the loop entirely when quiet
     LOG_SERIAL.print("[DBG] ");
     LOG_SERIAL.print(label);
     LOG_SERIAL.print(" (");
@@ -44,7 +54,7 @@ void rtu_send(const uint8_t* tx, int tx_len) {
     // Flush stale RX bytes before transmitting
     int flushed = 0;
     while (RS485.available() && flushed < RTU_BUF_SIZE) { RS485.read(); flushed++; }
-    if (flushed > 0 && !_quiet) {
+    if (flushed > 0) {
         LOG_SERIAL.print("[RS485] Pre-TX flush: discarded ");
         LOG_SERIAL.print(flushed);
         LOG_SERIAL.println(" stale bytes.");
@@ -77,8 +87,8 @@ int rtu_transact(const uint8_t* tx, int tx_len, uint8_t* rx) {
             }
         }
         unsigned long elapsed = millis() - t;
-        if (!receiving && elapsed > TIMEOUT_FIRST_BYTE_MS) break;
-        if ( receiving && elapsed > TIMEOUT_INTER_BYTE_MS) break;
+        if (!receiving && elapsed > _t_first_ms) break;
+        if ( receiving && elapsed > _t_inter_ms) break;
     }
 
     // Strip TX echo if the transceiver looped back our own frame
@@ -89,40 +99,4 @@ int rtu_transact(const uint8_t* tx, int tx_len, uint8_t* rx) {
     }
 
     return rx_len;
-}
-
-// ── Modbus FC05 – Write Single Coil ───────────────────────────────────────
-bool writeCoil(uint8_t slaveId, uint16_t coilAddr, bool value) {
-    uint8_t tx[8];
-    tx[0] = slaveId;
-    tx[1] = 0x05;
-    tx[2] = (coilAddr >> 8) & 0xFF;
-    tx[3] =  coilAddr       & 0xFF;
-    tx[4] = value ? 0xFF : 0x00;
-    tx[5] = 0x00;
-    uint16_t c = crc16(tx, 6);
-    tx[6] = c & 0xFF;
-    tx[7] = (c >> 8) & 0xFF;
-
-    LOG_SERIAL.print("[FC05] WriteCoil → Slave="); LOG_SERIAL.print(slaveId);
-    LOG_SERIAL.print("  Coil="); LOG_SERIAL.print(coilAddr);
-    LOG_SERIAL.print("  Value="); LOG_SERIAL.println(value ? "ON" : "OFF");
-    printHex("FC05 TX", tx, 8);
-
-    uint8_t rx[RTU_BUF_SIZE];
-    int rx_len = rtu_transact(tx, 8, rx);
-
-    if (rx_len == 0) { LOG_SERIAL.println("[FC05] Timeout — no response.");   return false; }
-    if (rx_len < 8)  { LOG_SERIAL.println("[FC05] Response too short.");       return false; }
-
-    printHex("FC05 RX", rx, rx_len);
-
-    if (!verifyCRC(rx, rx_len)) { LOG_SERIAL.println("[FC05] CRC FAIL.");      return false; }
-    if (rx[1] == 0x85) {
-        LOG_SERIAL.print("[FC05] Exception code=0x"); LOG_SERIAL.println(rx[2], HEX);
-        return false;
-    }
-
-    LOG_SERIAL.println("[FC05] WriteCoil OK");
-    return true;
 }

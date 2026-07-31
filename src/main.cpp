@@ -1,149 +1,88 @@
-#include <Ethernet.h>
 #include <ArduinoRS485.h>
+#include <mbed_wait_api.h>
+#include <drivers/Watchdog.h>
+
 #include "config.h"
-#include "tcp_bridge.h"
-#include "self_test.h"
+#include "gw_config.h"
+#include "gw_console.h"
+#include "gw_status.h"
+#include "gw_store.h"
 #include "usb_bridge.h"
+#include "version.h"
 
-// ── Network identity (values in config.h) ──────────────────────────────────
-#if !USB_BRIDGE_ON_BOOT
-static byte      MAC_ADDR[] = NET_MAC_ADDRESS;
-static IPAddress STATIC_IP(NET_STATIC_IP);
-#endif
+#define WATCHDOG_MS       8000      // >> the worst legitimate stall (~2.2 s)
+#define HEALTHY_AFTER_MS  10000     // loop must run this long to clear the
+                                    // boot-attempt counter
+#define BTN_RECOVERY_MS   3000
+#define BTN_ERASE_MS      10000
 
-// ── Operating mode ─────────────────────────────────────────────────────────
-// Fixed at boot by USB_BRIDGE_ON_BOOT while the panel buttons are disabled;
-// the Green button toggles it at runtime when PANEL_BUTTONS_ENABLED is 1.
-static bool usbBridgeMode = (USB_BRIDGE_ON_BOOT != 0);
+static bool _healthyMarked = false;
 
-#if PANEL_BUTTONS_ENABLED
+// Hold the on-board button through boot to get back to a known state without
+// any tooling. Nothing here ever writes to the store except the explicit
+// 10 s erase.
+static void sampleBootButton(bool& forceDefaults, bool& eraseStore) {
+    const int idle = gwStatus_buttonRaw();
+    unsigned long t0 = millis();
+    unsigned long held = 0;
 
-// ── Hardware reset ─────────────────────────────────────────────────────────
-static void hardwareReset() {
-    if (!usbBridgeMode) LOG_SERIAL.println("[SYS] Hardware reset...");
-    digitalWrite(MODULE_RELAY_PIN, LOW);
-    digitalWrite(LED_RELAY_PIN,    LOW);
-    delay(RESET_RELAY_SETTLE_MS);
-    NVIC_SystemReset();
+    while (millis() - t0 < BTN_ERASE_MS + 500UL) {
+        if (gwStatus_buttonRaw() == idle) break;     // released
+        held = millis() - t0;
+        // Blink the fault LED so the operator can count the hold.
+        digitalWrite(LED_FAULT_PIN, ((held / 250) % 2) ? HIGH : LOW);
+        delay(10);
+    }
+    digitalWrite(LED_FAULT_PIN, LOW);
+
+    forceDefaults = held >= BTN_RECOVERY_MS;
+    eraseStore    = held >= BTN_ERASE_MS;
 }
 
-// ── Buttons ────────────────────────────────────────────────────────────────
-// Pressed = HIGH that persists across the debounce gap.
-static bool buttonPressed(pin_size_t pin) {
-    if (digitalRead(pin) != HIGH) return false;
-    delay(BTN_DEBOUNCE_MS);
-    return digitalRead(pin) == HIGH;
-}
-
-// ── Mode switching (Green button) ──────────────────────────────────────────
-static void enterUsbBridgeMode() {
-    LOG_SERIAL.println("[MODE] USB-RS485 bridge ON — serial logging suspended.");
-    tcpBridge_dropClient();
-    usbBridge_begin();
-    digitalWrite(USB_MODE_LED_PIN, HIGH);
-}
-
-static void leaveUsbBridgeMode() {
-    usbBridge_end();
-    digitalWrite(USB_MODE_LED_PIN, LOW);
-    LOG_SERIAL.println("[MODE] USB-RS485 bridge OFF — TCP gateway resumed.");
-}
-
-#endif // PANEL_BUTTONS_ENABLED
-
-// ── Setup ──────────────────────────────────────────────────────────────────
 void setup() {
     Serial.begin(SERIAL_BAUD);
-    delay(500);
-    LOG_SERIAL.println("========================================");
-    LOG_SERIAL.println("  Modbus TCP-RTU Gateway");
-    LOG_SERIAL.println("  Board: Arduino Opta");
-    LOG_SERIAL.println("========================================");
 
     pinMode(MODULE_RELAY_PIN, OUTPUT); digitalWrite(MODULE_RELAY_PIN, HIGH);
     pinMode(LED_RELAY_PIN,    OUTPUT); digitalWrite(LED_RELAY_PIN,    HIGH);
-#if PANEL_BUTTONS_ENABLED
-    pinMode(SW_R_PIN, INPUT);
-    pinMode(SW_G_PIN, INPUT);
-    pinMode(SW_B_PIN, INPUT);
-    pinMode(SW_Y_PIN, INPUT);
-    pinMode(SW_W_PIN, INPUT);
-#endif
     pinMode(USB_MODE_LED_PIN, OUTPUT); digitalWrite(USB_MODE_LED_PIN, LOW);
 
-    LOG_SERIAL.println("[INIT] Configuring RS485...");
-    RS485.setDelays(RS485_PRE_DELAY_US, RS485_POST_DELAY_US);
-    RS485.begin(RS485_BAUD);
-    RS485.receive();
-    LOG_SERIAL.print("[INIT] RS485 ready @ "); LOG_SERIAL.print(RS485_BAUD); LOG_SERIAL.println(" baud");
+    // Latches the reset reason, bumps the boot-attempt counter and caches the
+    // OTP MAC — the MAC must be read before any QSPI block device is mounted.
+    gwStatus_begin();
 
-#if !USB_BRIDGE_ON_BOOT
-    // Ethernet.begin() blocks until link-up on the mbed core — never call it
-    // in USB-bridge builds, which must run with no LAN cable attached.
-    tcpBridge_init(MAC_ADDR, STATIC_IP);
-#endif
+    bool forceDefaults = false, eraseStore = false;
+    sampleBootButton(forceDefaults, eraseStore);
 
-    if (usbBridgeMode) {
-        // Mode fixed in code: pure USB-RS485 converter from boot.
-        // No startup coil sweep — the RS485 bus belongs to the PC master.
-        LOG_SERIAL.println("[MODE] USB-RS485 bridge (fixed in code) — serial logging suspended.");
-        LOG_SERIAL.println("========================================");
-        usbBridge_begin();
-        digitalWrite(USB_MODE_LED_PIN, HIGH);
-        return;
-    }
+    // Three failed boots in a row also force defaults, so a stored value that
+    // hangs the board heals itself without tooling.
+    if (gwStatus_safeMode()) forceDefaults = true;
 
-    LOG_SERIAL.println("[INIT] Gateway ONLINE — waiting for connections...");
-    LOG_SERIAL.println("========================================");
+    gwStore_begin();
+    if (eraseStore) gwStore_erase();
+    gwConfig_begin(forceDefaults);
 
-    delay(STARTUP_SWEEP_DELAY_MS);
-    selfTest_coilSweep();
+    // From here the bridge is live. Everything above is bounded; everything
+    // below is optional. This ordering is the whole safety story: no stored
+    // value and no storage failure can cost the USB bridge.
+    usbBridge_begin();
+    gwConsole_begin();
+    digitalWrite(USB_MODE_LED_PIN, HIGH);
+
+    LOG_SERIAL.print("[SYS] LGS gateway "); LOG_SERIAL.print(GW_FW_VERSION);
+    LOG_SERIAL.print(" up, config="); LOG_SERIAL.println(gwConfig_sourceName());
+
+    mbed::Watchdog::get_instance().start(WATCHDOG_MS);
 }
 
-// ── Loop ───────────────────────────────────────────────────────────────────
 void loop() {
-#if SERIAL_LOG_ENABLED
-    // Debug-build liveness heartbeat (absent from production: logs compiled out).
-    static unsigned long t_hb = 0;
-    if (millis() - t_hb >= 5000UL) {
-        t_hb = millis();
-        LOG_SERIAL.println("[SYS] alive");
-    }
-#endif
-#if PANEL_BUTTONS_ENABLED
-    // Green button toggles between TCP-gateway and USB-RS485 bridge mode.
-    if (buttonPressed(SW_G_PIN)) {
-        usbBridgeMode = !usbBridgeMode;
-        if (usbBridgeMode) enterUsbBridgeMode();
-        else               leaveUsbBridgeMode();
-        while (digitalRead(SW_G_PIN) == HIGH) delay(10);   // wait for release
-    }
+    mbed::Watchdog::get_instance().kick();
 
-    // White button → hardware reset (available in both modes).
-    if (buttonPressed(SW_W_PIN)) {
-        if (!usbBridgeMode) LOG_SERIAL.println("[SW] White — hardware reset.");
-        hardwareReset();
-    }
-#endif
+    usbBridge_update();
+    gwConsole_update();
+    gwStatus_update();
 
-    if (usbBridgeMode) {
-        usbBridge_update();
-#if !USB_BRIDGE_ON_BOOT
-        tcpBridge_rejectPending();   // TCP server exists only in TCP-boot builds
-#endif
-        return;
+    if (!_healthyMarked && millis() > HEALTHY_AFTER_MS) {
+        gwStatus_markHealthy();
+        _healthyMarked = true;
     }
-
-#if PANEL_BUTTONS_ENABLED
-    if (buttonPressed(SW_R_PIN)) {
-        LOG_SERIAL.println("[SW] Red — coil sweep.");
-        selfTest_coilSweep();
-    }
-    if (buttonPressed(SW_B_PIN)) {
-        LOG_SERIAL.println("[SW] Blue — extended coil test.");
-        selfTest_extended();
-    }
-#endif
-
-    tcpBridge_update();
 }

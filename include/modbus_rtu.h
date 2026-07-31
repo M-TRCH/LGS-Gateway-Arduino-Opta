@@ -6,15 +6,15 @@
 #include "config.h"
 
 // ── Debug ──────────────────────────────────────────────────────────────────
+// Silent unless sys.log is on (see LOG_SERIAL in config.h).
 void printHex(const char* label, const uint8_t* buf, int len);
-
-// Suppress RS485 diagnostics on Serial while the USB-RS485 bridge owns the
-// serial stream (log text would corrupt the binary RTU session).
-void rtu_setQuiet(bool quiet);
 
 // ── CRC-16/Modbus ──────────────────────────────────────────────────────────
 uint16_t crc16(const uint8_t* buf, int len);
 bool     verifyCRC(const uint8_t* buf, int len);
+
+// ── Runtime timing (applied from GwConfig) ─────────────────────────────────
+void rtu_setTimeouts(uint16_t firstByteMs, uint16_t interByteMs);
 
 // ── RS485 Transaction ──────────────────────────────────────────────────────
 // Send an RTU frame and receive the slave response.
@@ -27,17 +27,10 @@ int rtu_transact(const uint8_t* tx, int tx_len, uint8_t* rx);
 
 // ── RS485 Send-only (Modbus broadcast, slave address 0) ───────────────────
 // Transmits and returns as soon as the bytes are on the wire — a broadcast is
-// never answered, so waiting out TIMEOUT_FIRST_BYTE_MS would only stall the
+// never answered, so waiting out the first-byte timeout would only stall the
 // bridge and let the host's following frames pile up behind it.
 // Any TX echo left by the transceiver is discarded by the next transaction's
 // pre-TX flush.
 void rtu_send(const uint8_t* tx, int tx_len);
-
-// ── Modbus FC05 – Write Single Coil ───────────────────────────────────────
-// @param slaveId   Modbus slave address (1–247).
-// @param coilAddr  Coil address (0-based).
-// @param value     true = ON, false = OFF.
-// @return true on success, false on timeout / CRC error / exception.
-bool writeCoil(uint8_t slaveId, uint16_t coilAddr, bool value);
 
 #endif // MODBUS_RTU_H

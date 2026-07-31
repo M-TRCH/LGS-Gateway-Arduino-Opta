@@ -39,8 +39,8 @@ bool verifyCRC(const uint8_t* buf, int len) {
     return calc == recv;
 }
 
-// ── RS485 Transaction ──────────────────────────────────────────────────────
-int rtu_transact(const uint8_t* tx, int tx_len, uint8_t* rx) {
+// ── RS485 Send-only (broadcast) ────────────────────────────────────────────
+void rtu_send(const uint8_t* tx, int tx_len) {
     // Flush stale RX bytes before transmitting
     int flushed = 0;
     while (RS485.available() && flushed < RTU_BUF_SIZE) { RS485.read(); flushed++; }
@@ -50,10 +50,17 @@ int rtu_transact(const uint8_t* tx, int tx_len, uint8_t* rx) {
         LOG_SERIAL.println(" stale bytes.");
     }
 
+    // endTransmission() blocks until the last byte has left the UART, so the
+    // caller is paced by the bus itself.
     RS485.beginTransmission();
     RS485.write(tx, tx_len);
     RS485.endTransmission();
     RS485.receive();
+}
+
+// ── RS485 Transaction ──────────────────────────────────────────────────────
+int rtu_transact(const uint8_t* tx, int tx_len, uint8_t* rx) {
+    rtu_send(tx, tx_len);
 
     // Receive response with timeout
     int rx_len = 0;

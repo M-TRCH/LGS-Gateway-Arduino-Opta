@@ -98,6 +98,13 @@ void tcpBridge_update() {
     rtu_buf[rtu_len + 1] = (c >> 8) & 0xFF;
     printHex("RTU TX", rtu_buf, rtu_len + 2);
 
+    // ── Broadcast: forward and move on (no slave answers address 0) ───────
+    if (rtu_buf[0] == 0x00) {
+        rtu_send(rtu_buf, rtu_len + 2);
+        LOG_SERIAL.println("[TCP] Broadcast forwarded — no reply expected.");
+        return;
+    }
+
     // ── RS485 transaction ──────────────────────────────────────────────────
     uint8_t rx_buf[RTU_BUF_SIZE];
     int rx_len = rtu_transact(rtu_buf, rtu_len + 2, rx_buf);

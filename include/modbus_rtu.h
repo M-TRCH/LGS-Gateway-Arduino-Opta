@@ -25,6 +25,14 @@ bool     verifyCRC(const uint8_t* buf, int len);
 // @return Number of response bytes received (0 = timeout).
 int rtu_transact(const uint8_t* tx, int tx_len, uint8_t* rx);
 
+// ── RS485 Send-only (Modbus broadcast, slave address 0) ───────────────────
+// Transmits and returns as soon as the bytes are on the wire — a broadcast is
+// never answered, so waiting out TIMEOUT_FIRST_BYTE_MS would only stall the
+// bridge and let the host's following frames pile up behind it.
+// Any TX echo left by the transceiver is discarded by the next transaction's
+// pre-TX flush.
+void rtu_send(const uint8_t* tx, int tx_len);
+
 // ── Modbus FC05 – Write Single Coil ───────────────────────────────────────
 // @param slaveId   Modbus slave address (1–247).
 // @param coilAddr  Coil address (0-based).

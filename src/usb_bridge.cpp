@@ -43,6 +43,16 @@ void usbBridge_update() {
     }
     printHex("USB TX->RS485", frame, len);
 
+    // Broadcast (slave address 0, e.g. the OTA chunk stream): no slave ever
+    // answers, so forward it and move on. Waiting the full first-byte timeout
+    // would stall this loop while the host's next frames accumulate in the USB
+    // buffer — they would then be read back-to-back as one oversized frame,
+    // fail CRC and be dropped.
+    if (frame[0] == 0x00) {
+        rtu_send(frame, len);
+        return;
+    }
+
     uint8_t rx[RTU_BUF_SIZE];
     int rx_len = rtu_transact(frame, len, rx);
 

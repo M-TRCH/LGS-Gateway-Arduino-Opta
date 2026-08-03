@@ -4,18 +4,21 @@
 #include <Ethernet.h>
 #include "config.h"
 
-// Initialise Ethernet with the given MAC and static IP, then start TCP server.
-void tcpBridge_init(byte* mac, const IPAddress& ip);
+// Modbus TCP ↔ RTU bridge. The listener is owned by net_runtime, which starts
+// it once the link is up and stops it when the link drops; this module never
+// touches the Ethernet interface itself.
 
-// Process one iteration of the Modbus TCP ↔ RTU bridge.
-// Call every loop() iteration.
+// (Re)start the listener on `port`, dropping the current client. Safe to call
+// again with a different port — the old socket is released first.
+void tcpBridge_start(uint16_t port);
+
+// Drop the client and release the listening socket.
+void tcpBridge_stop();
+
+// Process one iteration. Call every loop() iteration while the link is up.
 void tcpBridge_update();
 
-// Drop the active client, if any. Used when leaving TCP-gateway mode.
-void tcpBridge_dropClient();
-
-// Accept and immediately close any pending connection, silently.
-// Call instead of tcpBridge_update() while the USB-RS485 bridge is active.
-void tcpBridge_rejectPending();
+// True while a TCP client is connected (reported by the console as net.client).
+bool tcpBridge_hasClient();
 
 #endif // TCP_BRIDGE_H

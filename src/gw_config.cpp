@@ -3,6 +3,7 @@
 #include "gw_status.h"
 #include "gw_store.h"
 #include "modbus_rtu.h"
+#include "net_runtime.h"
 #include "usb_bridge.h"
 
 // ── Key table ──────────────────────────────────────────────────────────────
@@ -155,10 +156,6 @@ void gwConfig_begin(bool forceDefaults) {
                 break;
         }
     }
-
-    // Phase 1: the network keys are stored and validated but never drive
-    // hardware — Ethernet arrives in phase 2.
-    _active.net_enabled = 0;
 
     _staged = _active;
     gwConfig_applyLive();
@@ -340,6 +337,9 @@ void gwConfig_applyLive() {
     RS485.setDelays(_active.rs485_pre_us, _active.rs485_post_us);
     RS485.begin(_active.rs485_baud);
     RS485.receive();
+    // No-op until the link is up, including the call from gwConfig_begin()
+    // that runs before the network exists at all.
+    netRuntime_applyPort(_active.net_port);
 }
 
 bool gwConfig_commit(char* applied, size_t appliedN,
@@ -350,8 +350,10 @@ bool gwConfig_commit(char* applied, size_t appliedN,
         return false;
     }
 
-    // Collect what will change before active is overwritten.
-    bool liveChange = false;
+    // Collect what will change before active is overwritten. Grouping by key
+    // prefix keeps this honest as keys are added.
+    bool live[3] = { false, false, false };          // rs485, usb, net
+    static const char* GROUP[3] = { "rs485", "usb", "net" };
     size_t pos = 0;
     if (pendingN) pending[0] = '\0';
     for (int i = 0; i < KEY_N; i++) {
@@ -359,8 +361,12 @@ bool gwConfig_commit(char* applied, size_t appliedN,
         if (gwConfig_needsReboot(i)) {
             pos += snprintf(pending + pos, (pos < pendingN) ? pendingN - pos : 0,
                             "%s%s", pos ? "," : "", gwConfig_keyName(i));
-        } else {
-            liveChange = true;
+            continue;
+        }
+        const char* name = gwConfig_keyName(i);
+        for (int g = 0; g < 3; g++) {
+            size_t n = strlen(GROUP[g]);
+            if (strncmp(name, GROUP[g], n) == 0 && name[n] == '.') live[g] = true;
         }
     }
 
@@ -370,12 +376,17 @@ bool gwConfig_commit(char* applied, size_t appliedN,
     }
 
     _active = _staged;
-    _active.net_enabled = 0;              // phase 1: network stays inert
-    _staged = _active;
     _source = GwSource::STORED;
     gwConfig_applyLive();
 
-    snprintf(applied, appliedN, "%s", liveChange ? "rs485,usb" : "none");
+    size_t ap = 0;
+    if (appliedN) applied[0] = '\0';
+    for (int g = 0; g < 3; g++) {
+        if (!live[g]) continue;
+        ap += snprintf(applied + ap, (ap < appliedN) ? appliedN - ap : 0,
+                       "%s%s", ap ? "," : "", GROUP[g]);
+    }
+    if (ap == 0) snprintf(applied, appliedN, "none");
     return true;
 }
 

@@ -7,6 +7,8 @@
 #include "gw_console.h"
 #include "gw_status.h"
 #include "gw_store.h"
+#include "net_runtime.h"
+#include "tcp_bridge.h"
 #include "usb_bridge.h"
 #include "version.h"
 
@@ -68,8 +70,13 @@ void setup() {
     gwConsole_begin();
     digitalWrite(USB_MODE_LED_PIN, HIGH);
 
+    // Optional, and deliberately last: the worst a missing cable or a wrong
+    // address can cost is net.link_timeout_ms of extra boot time.
+    netRuntime_begin();
+
     LOG_SERIAL.print("[SYS] LGS gateway "); LOG_SERIAL.print(GW_FW_VERSION);
-    LOG_SERIAL.print(" up, config="); LOG_SERIAL.println(gwConfig_sourceName());
+    LOG_SERIAL.print(" up, config="); LOG_SERIAL.print(gwConfig_sourceName());
+    LOG_SERIAL.print(", net="); LOG_SERIAL.println(netRuntime_stateName());
 
     mbed::Watchdog::get_instance().start(WATCHDOG_MS);
 }
@@ -79,6 +86,8 @@ void loop() {
 
     usbBridge_update();
     gwConsole_update();
+    netRuntime_update();
+    if (netRuntime_isUp()) tcpBridge_update();
     gwStatus_update();
 
     if (!_healthyMarked && millis() > HEALTHY_AFTER_MS) {

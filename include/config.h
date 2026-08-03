@@ -44,7 +44,9 @@ extern bool g_logEnabled;
 #define DEF_USB_FRAME_GAP_MS    10      // ms – silence that ends one RTU frame
 #define DEF_USB_FRAME_MAX_MS    100     // ms – hard cap on one frame
 
-// ── Factory defaults: network (inert until phase 2) ────────────────────────
+// ── Factory defaults: network ──────────────────────────────────────────────
+// Off by default: a gateway shipped for SMT talks over USB only, and a unit
+// that has never been configured should not put an address on someone's LAN.
 #define DEF_NET_ENABLED         0
 #define DEF_NET_IP              0xC0A800B2UL    // 192.168.0.178
 #define DEF_NET_MASK            0xFFFFFF00UL    // 255.255.255.0
@@ -54,7 +56,7 @@ extern bool g_logEnabled;
 #define DEF_NET_LINK_TIMEOUT_MS 1500    // ms – bounded Ethernet.begin() wait
 
 // ── Modbus TCP framing ─────────────────────────────────────────────────────
-#define MODBUS_TCP_PORT     502         // static server port until phase 2
+// The listening port itself is runtime config (net.port), not a constant.
 #define TCP_BUF_SIZE        256
 #define MBAP_HEADER_LEN     6
 #define TIMEOUT_TCP_PAYLOAD_MS  100UL   // ms – wait for fragmented TCP payload

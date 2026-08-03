@@ -5,6 +5,8 @@
 #include "gw_config.h"
 #include "gw_status.h"
 #include "gw_store.h"
+#include "net_runtime.h"
+#include "tcp_bridge.h"
 #include "version.h"
 
 #define GW_MAGIC        "$LGS "
@@ -72,8 +74,9 @@ static void doInfo() {
     int macIdx = gwConfig_indexOf("net.mac");
     gwConfig_format(macIdx, false, mac, sizeof(mac));
 
-    emitf("#DATA fw=%s build=%s hw=opta id=%s mac=%s",
-          GW_FW_VERSION, GW_FW_BUILD, serial, mac);
+    emitf("#DATA fw=%s build=%s hw=opta id=%s mac=%s macsrc=%s",
+          GW_FW_VERSION, GW_FW_BUILD, serial, mac,
+          gwStatus_macValid() ? "board" : "placeholder");
     emitf("#DATA sys.name=%s sys.log=%d sys.up=%lu sys.reset=%s",
           gwConfig_active().sys_name, g_logEnabled ? 1 : 0,
           (unsigned long)gwStatus_uptimeS(), gwStatus_resetReason());
@@ -82,7 +85,11 @@ static void doInfo() {
     emitf("#DATA cfg.source=%s cfg.store=%s cfg.dirty=%d cfg.armed=%d",
           gwConfig_sourceName(), gwStore_available() ? "ok" : "unavailable",
           gwConfig_dirtyCount(), gwConsole_armed() ? 1 : 0);
-    emitf("#DATA net.state=disabled(phase1)");
+    const IPAddress ip = netRuntime_localIp();
+    emitf("#DATA net.state=%s net.ip=%u.%u.%u.%u net.port=%u net.client=%d",
+          netRuntime_stateName(), (unsigned)ip[0], (unsigned)ip[1],
+          (unsigned)ip[2], (unsigned)ip[3],
+          gwConfig_active().net_port, tcpBridge_hasClient() ? 1 : 0);
     emitf("#DATA cnt.usb_ok=%lu cnt.usb_drop=%lu cnt.tcp_ok=%lu",
           (unsigned long)gwStatus_get(GW_USB_OK),
           (unsigned long)gwStatus_get(GW_USB_DROP),

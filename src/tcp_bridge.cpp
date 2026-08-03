@@ -1,16 +1,27 @@
 #include "tcp_bridge.h"
+#include "gw_status.h"
 #include "modbus_rtu.h"
 
-static EthernetServer _server(MODBUS_TCP_PORT);
+// Constructed without a port: the listener does not exist until net_runtime
+// starts it, so nothing here runs on a gateway with the network switched off.
+static EthernetServer _server;
 static EthernetClient _client;
 
-// ── Init ───────────────────────────────────────────────────────────────────
-void tcpBridge_init(byte* mac, const IPAddress& ip) {
-    Ethernet.begin(mac, ip);
-    _server.begin();
-    LOG_SERIAL.print("[INIT] IP: "); LOG_SERIAL.println(Ethernet.localIP());
-    LOG_SERIAL.print("[INIT] Modbus TCP listening on port "); LOG_SERIAL.println(MODBUS_TCP_PORT);
+// ── Listener lifecycle ─────────────────────────────────────────────────────
+void tcpBridge_start(uint16_t port) {
+    // MbedServer::begin() only allocates when its socket is null, so an
+    // existing listener has to be released before it will bind a new port.
+    if (_client) _client.stop();
+    _server.end();
+    _server.begin(port);
 }
+
+void tcpBridge_stop() {
+    if (_client) _client.stop();
+    _server.end();
+}
+
+bool tcpBridge_hasClient() { return (bool)_client; }
 
 // ── Update (call every loop) ───────────────────────────────────────────────
 void tcpBridge_update() {
@@ -81,6 +92,7 @@ void tcpBridge_update() {
     }
 
     int tcp_total = MBAP_HEADER_LEN + n;
+    gwStatus_count(GW_TCP_OK);
     printHex("TCP RX", tcp_buf, tcp_total);
     LOG_SERIAL.print("[TCP] Unit ID="); LOG_SERIAL.print(tcp_buf[6]);
     LOG_SERIAL.print("  FC=0x"); LOG_SERIAL.println(tcp_buf[7], HEX);
@@ -101,13 +113,17 @@ void tcpBridge_update() {
     // ── Broadcast: forward and move on (no slave answers address 0) ───────
     if (rtu_buf[0] == 0x00) {
         rtu_send(rtu_buf, rtu_len + 2);
+        gwStatus_pulseRs485();
         LOG_SERIAL.println("[TCP] Broadcast forwarded — no reply expected.");
         return;
     }
 
     // ── RS485 transaction ──────────────────────────────────────────────────
     uint8_t rx_buf[RTU_BUF_SIZE];
+    unsigned long t0 = millis();
     int rx_len = rtu_transact(rtu_buf, rtu_len + 2, rx_buf);
+    gwStatus_pulseRs485();
+    gwStatus_countRtu(rx_len > 0, millis() - t0);
 
     if (rx_len == 0) {
         LOG_SERIAL.println("[ERR] No response from slave — not forwarding to TCP client.");
@@ -140,14 +156,4 @@ void tcpBridge_update() {
     printHex("TCP TX", resp, resp_total);
     _client.write(resp, resp_total);
     LOG_SERIAL.print("[TCP] Forwarded "); LOG_SERIAL.print(resp_total); LOG_SERIAL.println(" bytes to client.");
-}
-
-// ── Mode support (USB-RS485 bridge) ────────────────────────────────────────
-void tcpBridge_dropClient() {
-    if (_client) _client.stop();
-}
-
-void tcpBridge_rejectPending() {
-    EthernetClient newClient = _server.accept();
-    if (newClient) newClient.stop();
 }

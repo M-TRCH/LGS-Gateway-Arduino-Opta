@@ -21,7 +21,17 @@ static bool     _safeMode;
 static bool     _fault;
 static const char* _resetReason = "unknown";
 static uint8_t  _mac[6];
+static bool     _macValid;
 static unsigned long _rs485PulseUntil;
+
+// A unicast address that is neither all-zero nor all-ones. Enough to tell a
+// real OTP address from whatever happened to be at the fallback flash offset.
+static bool macLooksReal(const uint8_t* m) {
+    if (m[0] & 0x01) return false;                  // multicast bit
+    uint8_t any = 0x00, all = 0xFF;
+    for (int i = 0; i < 6; i++) { any |= m[i]; all &= m[i]; }
+    return any != 0x00 && all != 0xFF;
+}
 
 // ── RTC backup domain ──────────────────────────────────────────────────────
 static uint32_t bkpRead(uint32_t reg) {
@@ -63,7 +73,12 @@ void gwStatus_begin() {
 
     // Read the OTP MAC BEFORE anything mounts the QSPI block device: the
     // variant's OTP reader opens its own mbed::QSPI on the same pins.
-    if (_getSecureEthMac_(_mac) != 1) {
+    //
+    // _getSecureEthMac_() returns the byte count (always 6), not a success
+    // flag, and when the OTP magic does not match it copies from a raw flash
+    // pointer instead — so the bytes are the only thing worth trusting.
+    _macValid = (_getSecureEthMac_(_mac) == 6) && macLooksReal(_mac);
+    if (!_macValid) {
         static const uint8_t fallback[6] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
         memcpy(_mac, fallback, sizeof(_mac));
     }
@@ -144,7 +159,14 @@ const char* gwStatus_resetReason() { return _resetReason; }
 uint32_t    gwStatus_uptimeS()     { return (millis() - _bootMs) / 1000UL; }
 
 // ── Identity ───────────────────────────────────────────────────────────────
-const uint8_t* gwStatus_mac() { return _mac; }
+const uint8_t* gwStatus_mac()  { return _mac; }
+bool           gwStatus_macValid() { return _macValid; }
+
+void gwStatus_setMac(const uint8_t* mac) {
+    if (!mac || !macLooksReal(mac)) return;
+    memcpy(_mac, mac, sizeof(_mac));
+    _macValid = true;
+}
 
 void gwStatus_serialHex(char* out, size_t n) {
     uint8_t uid[64];

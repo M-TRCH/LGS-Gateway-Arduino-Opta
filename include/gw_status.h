@@ -46,8 +46,12 @@ const char* gwStatus_resetReason();
 uint32_t    gwStatus_uptimeS();
 
 // Board identity — the OTP MAC must be cached before any QSPI block device is
-// mounted, so gwStatus_begin() reads it up front.
+// mounted, so gwStatus_begin() reads it up front. When the OTP holds nothing
+// usable the reported address is a placeholder: gwStatus_macValid() is false
+// and the network hands begin() a nullptr so mbed derives its own instead.
 const uint8_t* gwStatus_mac();
+bool           gwStatus_macValid();
+void           gwStatus_setMac(const uint8_t* mac);   // adopt the interface's
 void           gwStatus_serialHex(char* out, size_t n);
 
 // Raw level of the on-board button, so its polarity can be measured on the

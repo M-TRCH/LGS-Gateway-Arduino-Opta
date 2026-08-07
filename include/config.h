@@ -61,4 +61,34 @@ extern bool g_logEnabled;
 #define MBAP_HEADER_LEN     6
 #define TIMEOUT_TCP_PAYLOAD_MS  100UL   // ms – wait for fragmented TCP payload
 
+// RS485 switch hub (see modbus_rtu.cpp for the full model). Measured on a
+// live LGS-64 cabinet: the first frame on a new channel triggers the switch
+// and is always lost, and the channel stays deaf for ~2 s — repair frames at
+// 0.8/1.15/1.55 s after the trigger were all eaten, the first request after
+// 2.0-2.5 s always passed. The repair is therefore a settle CLOCK: spend the
+// trigger, remember when the channel opens, and hold later requests in
+// silence until that deadline instead of feeding the hub frames to swallow.
+//
+// RETRY is attempts for the crossing transaction itself: 2 means trigger
+// plus one post-settle send, which only ever fires when the budget is
+// raised for a patient master; against a normal 1-1.5 s master the second
+// attempt cannot fit and the crossing fails in one cheap timeout.
+#define DEF_HUB_RETRY        2
+// Margin added past the computed deadline before transmitting, for hubs
+// whose settle time wanders. Folded into the deadline, not a sleep of its
+// own; the measured spread (fail at 2.03 s, pass at 2.53 s) is already
+// inside DEF_HUB_SETTLE_MS, so no extra by default.
+#define DEF_HUB_GAP_MS       0
+// How long the hub stays deaf after the trigger frame. The single number
+// that belongs to the hub hardware on site, hence runtime-tunable as
+// bus.hub_settle_ms.
+#define DEF_HUB_SETTLE_MS    2200
+// Ceiling for one transaction (hold + send + reply), measured from its
+// start. Must stay under what the master is willing to wait or the bridge
+// desynchronises — which is worse than the frame the repair set out to
+// save. 1400 suits the common 1.5-2 s masters; a master that waits ≥2.6 s
+// can raise this past settle+2×t1 and then even the crossing transaction
+// repairs itself in-line.
+#define DEF_HUB_BUDGET_MS    1400
+
 #endif // CONFIG_H

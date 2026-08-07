@@ -3,6 +3,7 @@
 #include <stdarg.h>
 
 #include "gw_config.h"
+#include "modbus_rtu.h"
 #include "gw_status.h"
 #include "gw_store.h"
 #include "net_runtime.h"
@@ -82,8 +83,14 @@ static void doInfo() {
           (unsigned long)gwStatus_uptimeS(), gwStatus_resetReason());
     emitf("#DATA sys.safe=%d sys.boots=%u sys.btn=%d",
           gwStatus_safeMode() ? 1 : 0, gwStatus_bootAttempts(), gwStatus_buttonRaw());
-    emitf("#DATA cfg.source=%s cfg.store=%s cfg.dirty=%d cfg.armed=%d",
+    // cfg.why carries gwStore's own reason when the store is down. Without it
+    // a failed save says only "store_unavailable", which reads the same for
+    // an unformatted QSPI, a missing partition and a corrupt TDBStore — three
+    // different repairs. The firmware already knows which; it just never said.
+    const char* storeWhy = gwStore_lastError();
+    emitf("#DATA cfg.source=%s cfg.store=%s cfg.why=%s cfg.dirty=%d cfg.armed=%d",
           gwConfig_sourceName(), gwStore_available() ? "ok" : "unavailable",
+          (storeWhy && *storeWhy) ? storeWhy : "-",
           gwConfig_dirtyCount(), gwConsole_armed() ? 1 : 0);
     const IPAddress ip = netRuntime_localIp();
     emitf("#DATA net.state=%s net.ip=%u.%u.%u.%u net.port=%u net.client=%d",
@@ -98,9 +105,12 @@ static void doInfo() {
           (unsigned long)gwStatus_get(GW_RS485_OK),
           (unsigned long)gwStatus_get(GW_RS485_TIMEOUT),
           (unsigned long)gwStatus_get(GW_CFG_CMD));
+    emitf("#DATA hub.cross=%lu hub.extra=%lu hub.wait_ms=%lu hub.skip=%lu",
+          (unsigned long)rtu_hubCross(), (unsigned long)rtu_hubExtra(),
+          (unsigned long)rtu_hubWaitMs(), (unsigned long)rtu_hubSkip());
     emitf("#DATA rtt.last_ms=%u rtt.max_ms=%u rtt.consec_timeout=%u",
           gwStatus_lastRttMs(), gwStatus_maxRttMs(), gwStatus_consecutiveTimeouts());
-    emitf("#OK INFO n=8");
+    emitf("#OK INFO n=9");
 }
 
 static void doHelp() {

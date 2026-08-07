@@ -13,8 +13,32 @@
 // every boot, so a unit can never ship with logging on and corrupt the host's
 // binary Modbus stream.
 
+// RS485 switch hub. The bus can run through an 8-channel hub that follows
+// traffic: the first frame on a new channel makes it switch, that frame is
+// swallowed, and the channel stays deaf for about two seconds (measured on a
+// live LGS-64 cabinet — see modbus_rtu.cpp). Two seconds is longer than any
+// master's timeout, so the gateway repairs by CLOCK, not by burst: it spends
+// the trigger frame, remembers when the channel opens, and holds any earlier
+// request in silence until that deadline before sending it.
+//
+// This has to live in the gateway, not in a client: the hospital's server
+// speaks Modbus TCP and knows nothing about a hub, and a lost frame is a
+// transport fault, so the layer that owns the wire repairs it.
+//
+// Which slave sits on which channel is wiring, not arithmetic — a map from
+// row (the tens digit of the slave ID) to channel, editable at `bus.hub_map`.
+// An all-zero map means "no hub" and disables all of this, which is what a
+// gateway wired straight to the bus wants.
+#define GW_HUB_MAX_ROWS   10        // slave IDs 11-108 -> rows 1-10
+#define GW_HUB_MAX_CH     8
+
 struct GwConfig {
     char     sys_name[16];
+    uint8_t  hub_map[GW_HUB_MAX_ROWS];   // row 1..10 -> channel 1..8, 0 = none
+    uint8_t  hub_retry;                  // attempts for the crossing txn itself
+    uint16_t hub_gap_ms;                 // margin added past the settle deadline
+    uint16_t hub_settle_ms;              // how long the hub stays deaf post-switch
+    uint16_t hub_budget_ms;              // ceiling for one transaction, hold included
     uint32_t rs485_baud;
     uint32_t rs485_pre_us;
     uint32_t rs485_post_us;

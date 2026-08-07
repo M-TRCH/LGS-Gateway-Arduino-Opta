@@ -7,7 +7,8 @@
 #include "usb_bridge.h"
 
 // ── Key table ──────────────────────────────────────────────────────────────
-enum GwKind : uint8_t { KIND_STR, KIND_BOOL, KIND_U16, KIND_U32, KIND_IP, KIND_MAC_RO };
+enum GwKind : uint8_t { KIND_STR, KIND_BOOL, KIND_U16, KIND_U32, KIND_IP, KIND_MAC_RO,
+                        KIND_HUBMAP };
 
 struct KeyDef {
     const char* name;
@@ -34,6 +35,12 @@ static const KeyDef KEYS[] = {
     { "net.port",             KIND_U16,  1, 65535,      false },
     { "net.link_timeout_ms",  KIND_U16,  500, 10000,    true  },
     { "net.mac",              KIND_MAC_RO, 0, 0,        false },
+    // Appended, never inserted: valueOf()/storeValue() switch on the index.
+    { "bus.hub_map",          KIND_HUBMAP, 0, 0,        false },
+    { "bus.hub_retry",        KIND_U16,  1, 10,         false },
+    { "bus.hub_gap_ms",       KIND_U16,  0, 1000,       false },
+    { "bus.hub_budget_ms",    KIND_U16,  0, 4000,       false },
+    { "bus.hub_settle_ms",    KIND_U16,  200, 5000,     false },
 };
 static const int KEY_N = (int)(sizeof(KEYS) / sizeof(KEYS[0]));
 
@@ -61,6 +68,14 @@ static void defaults(GwConfig& c) {
     c.net_dns              = DEF_NET_DNS;
     c.net_port             = DEF_NET_PORT;
     c.net_link_timeout_ms  = DEF_NET_LINK_TIMEOUT_MS;
+    // No hub by default: an all-zero map makes every row channel 0, so
+    // nothing ever counts as a channel change and a gateway wired
+    // straight to the bus behaves exactly as it did before this existed.
+    memset(c.hub_map, 0, sizeof(c.hub_map));
+    c.hub_retry            = DEF_HUB_RETRY;
+    c.hub_settle_ms        = DEF_HUB_SETTLE_MS;
+    c.hub_gap_ms           = DEF_HUB_GAP_MS;
+    c.hub_budget_ms        = DEF_HUB_BUDGET_MS;
 }
 
 static bool parseIp(const char* s, uint32_t* out) {
@@ -104,6 +119,10 @@ static uint32_t valueOf(const GwConfig& c, int i) {
         case 13: return c.net_dns;
         case 14: return c.net_port;
         case 15: return c.net_link_timeout_ms;
+        case 18: return c.hub_retry;
+        case 19: return c.hub_gap_ms;
+        case 20: return c.hub_budget_ms;
+        case 21: return c.hub_settle_ms;
         default: return 0;
     }
 }
@@ -125,6 +144,10 @@ static void storeValue(GwConfig& c, int i, uint32_t v) {
         case 13: c.net_dns             = v; break;
         case 14: c.net_port            = (uint16_t)v; break;
         case 15: c.net_link_timeout_ms = (uint16_t)v; break;
+        case 18: c.hub_retry           = (uint8_t)v; break;
+        case 19: c.hub_gap_ms          = (uint16_t)v; break;
+        case 20: c.hub_budget_ms       = (uint16_t)v; break;
+        case 21: c.hub_settle_ms       = (uint16_t)v; break;
         default: break;
     }
 }
@@ -201,6 +224,8 @@ bool gwConfig_differs(int i) {
     if (i < 0 || i >= KEY_N) return false;
     if (KEYS[i].kind == KIND_MAC_RO) return false;
     if (i == 0) return strncmp(_active.sys_name, _staged.sys_name, sizeof(_active.sys_name)) != 0;
+    if (KEYS[i].kind == KIND_HUBMAP)
+        return memcmp(_active.hub_map, _staged.hub_map, sizeof(_active.hub_map)) != 0;
     return valueOf(_active, i) != valueOf(_staged, i);
 }
 
@@ -217,6 +242,17 @@ bool gwConfig_format(int i, bool staged, char* out, size_t n) {
         case KIND_STR:
             snprintf(out, n, "%s", c.sys_name);
             return true;
+        case KIND_HUBMAP: {
+            // Row 1..N as a comma list, so the wiring reads back the way
+            // someone would describe it at the cabinet.
+            size_t at = 0;
+            out[0] = ' ';
+            for (int r = 0; r < GW_HUB_MAX_ROWS && at + 4 < n; r++) {
+                at += snprintf(out + at, n - at, r ? ",%u" : "%u",
+                               (unsigned)c.hub_map[r]);
+            }
+            return true;
+        }
         case KIND_IP:
             formatIp(valueOf(c, i), out, n);
             return true;
@@ -257,6 +293,40 @@ int gwConfig_set(int i, const char* value, char* err, size_t errN) {
             return -1;
         }
         snprintf(_staged.sys_name, sizeof(_staged.sys_name), "%s", value);
+        return 0;
+    }
+
+    if (k.kind == KIND_HUBMAP) {
+        // "1,2,3,4,5,6,7,8,1,2" — row 1..N to hub channel, 0 = not behind the
+        // hub. Parsed into a scratch copy first, so a bad entry half way along
+        // cannot leave the staged map describing wiring that exists nowhere.
+        uint8_t scratch[GW_HUB_MAX_ROWS];
+        memset(scratch, 0, sizeof(scratch));
+        int row = 0;
+        const char* p = value;
+        while (*p && row < GW_HUB_MAX_ROWS) {
+            char* end = nullptr;
+            long ch = strtol(p, &end, 10);
+            if (end == p || ch < 0 || ch > GW_HUB_MAX_CH) {
+                snprintf(err, errN, "err=range key=%s allowed=0-%d_per_row",
+                         k.name, GW_HUB_MAX_CH);
+                return -1;
+            }
+            scratch[row++] = (uint8_t)ch;
+            p = end;
+            while (*p == ' ') p++;
+            if (*p == ',') { p++; while (*p == ' ') p++; }
+            else if (*p) {
+                snprintf(err, errN, "err=range key=%s allowed=comma_list", k.name);
+                return -1;
+            }
+        }
+        if (*p) {
+            snprintf(err, errN, "err=range key=%s allowed=max%drows",
+                     k.name, GW_HUB_MAX_ROWS);
+            return -1;
+        }
+        memcpy(_staged.hub_map, scratch, sizeof(_staged.hub_map));
         return 0;
     }
 
@@ -332,6 +402,8 @@ int gwConfig_validateStaged(char* detail, size_t n) {
 // ── Commit / apply ─────────────────────────────────────────────────────────
 void gwConfig_applyLive() {
     rtu_setTimeouts(_active.rs485_t1_ms, _active.rs485_t2_ms);
+    rtu_setHub(_active.hub_map, _active.hub_retry, _active.hub_gap_ms,
+               _active.hub_settle_ms, _active.hub_budget_ms);
     usbBridge_setFraming(_active.usb_gap_ms, _active.usb_max_ms);
     RS485.end();
     RS485.setDelays(_active.rs485_pre_us, _active.rs485_post_us);
@@ -352,8 +424,8 @@ bool gwConfig_commit(char* applied, size_t appliedN,
 
     // Collect what will change before active is overwritten. Grouping by key
     // prefix keeps this honest as keys are added.
-    bool live[3] = { false, false, false };          // rs485, usb, net
-    static const char* GROUP[3] = { "rs485", "usb", "net" };
+    bool live[4] = { false, false, false, false };   // rs485, usb, net, bus
+    static const char* GROUP[4] = { "rs485", "usb", "net", "bus" };
     size_t pos = 0;
     if (pendingN) pending[0] = '\0';
     for (int i = 0; i < KEY_N; i++) {
@@ -364,7 +436,7 @@ bool gwConfig_commit(char* applied, size_t appliedN,
             continue;
         }
         const char* name = gwConfig_keyName(i);
-        for (int g = 0; g < 3; g++) {
+        for (int g = 0; g < 4; g++) {
             size_t n = strlen(GROUP[g]);
             if (strncmp(name, GROUP[g], n) == 0 && name[n] == '.') live[g] = true;
         }
@@ -381,7 +453,7 @@ bool gwConfig_commit(char* applied, size_t appliedN,
 
     size_t ap = 0;
     if (appliedN) applied[0] = '\0';
-    for (int g = 0; g < 3; g++) {
+    for (int g = 0; g < 4; g++) {
         if (!live[g]) continue;
         ap += snprintf(applied + ap, (ap < appliedN) ? appliedN - ap : 0,
                        "%s%s", ap ? "," : "", GROUP[g]);

@@ -34,19 +34,6 @@ enum PanelAction : uint8_t {
 
 #define PANEL_BUTTONS       5
 
-/*  Status lamps on outputs 2-4 — green, amber, red — as a traffic light, one
- *  at a time, highest concern first:
- *
- *    red     the shelf is not usable: a reset is running, the gateway is in
- *            safe mode or cannot store its settings, the LAN it was told to
- *            use is down, or the RS485 bus has stopped answering
- *    amber   the gateway is talking to the cabinet, or a panel sweep is running
- *    green   ready
- *
- *  Amber therefore covers a server's normal polling: while somebody is using
- *  the cabinet the panel shows amber, and green means "ready and nobody is
- *  asking". That is what the colours were asked to mean.
- */
 /*  What lights an output. Each of outputs 2-4 is mapped to one of these
  *  (`panel.out2` / `out3` / `out4`), so the panel's colours mean whatever the
  *  site wired and decided rather than whatever the firmware assumed.
@@ -79,6 +66,10 @@ const char* panel_lampName();       // which outputs are lit, e.g. "-2-" or "off
  *  cannot leave the panel lying. */
 #define PANEL_LAMP_OFF  0xFE
 void panel_forceLamp(uint8_t out, uint32_t ms);
+
+// Drop the shelf's power for panel.reset_ms — the white button's action,
+// also used by the scheduler so both are the same event.
+void panel_startReset();
 
 void panel_begin();
 void panel_update();

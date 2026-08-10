@@ -72,6 +72,12 @@ struct GwConfig {
     // which output is wiring, and what a colour should mean is a site's call,
     // so both live here rather than in the firmware's assumptions.
     uint8_t  panel_out[3];              // outputs 2, 3, 4
+    // Scheduled power cycle of the shelf. The clock itself is not stored —
+    // the Opta cannot keep it through a power cut, so it is set at runtime
+    // and the schedule simply does nothing until it has been.
+    uint8_t  sched_reset_enabled;
+    uint16_t sched_reset_hhmm;          // 0-2359, wall time
+    uint8_t  sched_reset_days;          // bit0=Sun..bit6=Sat, 0 = every day
 };
 
 enum class GwSource : uint8_t { STORED, DEFAULTS, CORRUPT, UNAVAILABLE, MIGRATED };

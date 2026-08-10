@@ -135,4 +135,11 @@ extern bool g_logEnabled;
 #define DEF_PANEL_OUT3       2      // SRC_BUSY
 #define DEF_PANEL_OUT4       3      // SRC_FAULT
 
+// ── Factory defaults: clock and scheduler ──────────────────────────────────
+// Off by default. A cabinet that power-cycles itself at an hour nobody chose
+// is a fault, not a feature.
+#define DEF_SCHED_RESET_ENABLED 0
+#define DEF_SCHED_RESET_HHMM    300     // 03:00, as HHMM
+#define DEF_SCHED_RESET_DAYS    0       // 0 = every day; else bit0=Sun..bit6=Sat
+
 #endif // CONFIG_H

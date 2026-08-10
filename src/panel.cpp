@@ -135,6 +135,8 @@ static void startSweep(uint8_t action) {
     }
 }
 
+void panel_startReset() { startSweep(PANEL_RESET); }
+
 static void stepSweep() {
     const uint8_t slave = panel_slotAt(_cabinet, _index);
     if (slave == 0) { _running = PANEL_NONE; _total = 0; return; }

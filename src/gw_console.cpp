@@ -5,6 +5,7 @@
 #include "gw_config.h"
 #include "modbus_rtu.h"
 #include "panel.h"
+#include "sched.h"
 #include "gw_status.h"
 #include "gw_store.h"
 #include "net_runtime.h"
@@ -112,9 +113,17 @@ static void doInfo() {
     emitf("#DATA panel.state=%s panel.step=%u/%u panel.in=0x%02X panel.lamp=%s",
           panel_stateName(), panel_progress(), panel_total(),
           (unsigned)panel_inputMask(), panel_lampName());
+    char nowStr[24], nextStr[40];
+    sched_formatNow(nowStr, sizeof(nowStr));
+    sched_describeNext(nextStr, sizeof(nextStr));
+    // sched.last answers "did it actually run?" — a reset is over in a
+    // second and a half, which nobody is watching at 03:00.
+    emitf("#DATA time.now=%s time.set=%d sched.reset=%s sched.last=%lu",
+          nowStr, sched_timeSet() ? 1 : 0, nextStr,
+          (unsigned long)sched_lastFireEpoch());
     emitf("#DATA rtt.last_ms=%u rtt.max_ms=%u rtt.consec_timeout=%u",
           gwStatus_lastRttMs(), gwStatus_maxRttMs(), gwStatus_consecutiveTimeouts());
-    emitf("#OK INFO n=10");
+    emitf("#OK INFO n=11");
 }
 
 // Drive one lamp so the panel's wiring can be checked at the cabinet. Not
@@ -138,8 +147,27 @@ static void doLamp(char** argv, int argc) {
     emitf("#OK LAMP %s ms=%lu", argv[0], (unsigned long)ms);
 }
 
+// Read or set the wall clock. Setting is not gated on HELLO: the Opta loses
+// the time whenever it loses power, so the tool sets it the moment it
+// connects, and a clock that needs a session to correct is a clock that
+// spends its life wrong.
+static void doTime(char** argv, int argc) {
+    char nowStr[24];
+    if (argc >= 1) {
+        const uint32_t epoch = (uint32_t)strtoul(argv[0], nullptr, 10);
+        if (epoch < 1600000000UL) {         // before 2020: not a wall clock
+            emit("#ERR TIME err=range want=epoch_seconds_local");
+            return;
+        }
+        sched_setTime(epoch);
+    }
+    sched_formatNow(nowStr, sizeof(nowStr));
+    emitf("#OK TIME now=%s set=%d epoch=%lu", nowStr, sched_timeSet() ? 1 : 0,
+          (unsigned long)sched_now());
+}
+
 static void doHelp() {
-    emit("#DATA verbs=PING,INFO,HELP,GET,HELLO,BYE,SET,SAVE,DISCARD,DEFAULTS,REBOOT,LAMP");
+    emit("#DATA verbs=PING,INFO,HELP,GET,HELLO,BYE,SET,SAVE,DISCARD,DEFAULTS,REBOOT,LAMP,TIME");
     emit("#DATA note=SET/SAVE/DISCARD/DEFAULTS/REBOOT need HELLO first");
     for (int i = 0; i < gwConfig_keyCount(); i++) {
         emitf("#DATA key=%s%s%s", gwConfig_keyName(i),
@@ -241,6 +269,7 @@ static void dispatch(char* body) {
     else if (strcasecmp(verb, "INFO") == 0) doInfo();
     else if (strcasecmp(verb, "HELP") == 0) doHelp();
     else if (strcasecmp(verb, "LAMP") == 0) doLamp(rest, restN);
+    else if (strcasecmp(verb, "TIME") == 0) doTime(rest, restN);
     else if (strcasecmp(verb, "GET")  == 0) {
         if (restN == 0) { doGetAll(); return; }
         int idx = gwConfig_indexOf(rest[0]);

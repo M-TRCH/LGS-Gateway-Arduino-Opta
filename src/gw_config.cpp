@@ -1,5 +1,6 @@
 #include "gw_config.h"
 #include "panel.h"
+#include "sched.h"
 
 #include "gw_status.h"
 #include "gw_store.h"
@@ -58,6 +59,9 @@ static const KeyDef KEYS[] = {
     { "panel.out2",           KIND_U16,  0, 7,          false },
     { "panel.out3",           KIND_U16,  0, 7,          false },
     { "panel.out4",           KIND_U16,  0, 7,          false },
+    { "sched.reset_enabled",  KIND_BOOL, 0, 1,          false },
+    { "sched.reset_hhmm",     KIND_U16,  0, 2359,       false },
+    { "sched.reset_days",     KIND_U16,  0, 127,        false },
 };
 static const int KEY_N = (int)(sizeof(KEYS) / sizeof(KEYS[0]));
 
@@ -112,6 +116,9 @@ static void defaults(GwConfig& c) {
     c.panel_out[0]         = DEF_PANEL_OUT2;
     c.panel_out[1]         = DEF_PANEL_OUT3;
     c.panel_out[2]         = DEF_PANEL_OUT4;
+    c.sched_reset_enabled  = DEF_SCHED_RESET_ENABLED;
+    c.sched_reset_hhmm     = DEF_SCHED_RESET_HHMM;
+    c.sched_reset_days     = DEF_SCHED_RESET_DAYS;
 }
 
 static bool parseIp(const char* s, uint32_t* out) {
@@ -175,6 +182,9 @@ static uint32_t valueOf(const GwConfig& c, int i) {
         case 35: return c.panel_out[0];
         case 36: return c.panel_out[1];
         case 37: return c.panel_out[2];
+        case 38: return c.sched_reset_enabled;
+        case 39: return c.sched_reset_hhmm;
+        case 40: return c.sched_reset_days;
         default: return 0;
     }
 }
@@ -216,6 +226,9 @@ static void storeValue(GwConfig& c, int i, uint32_t v) {
         case 35: c.panel_out[0]        = (uint8_t)v; break;
         case 36: c.panel_out[1]        = (uint8_t)v; break;
         case 37: c.panel_out[2]        = (uint8_t)v; break;
+        case 38: c.sched_reset_enabled = (uint8_t)v; break;
+        case 39: c.sched_reset_hhmm    = (uint16_t)v; break;
+        case 40: c.sched_reset_days    = (uint8_t)v; break;
         default: break;
     }
 }
@@ -451,6 +464,11 @@ int gwConfig_validateStaged(char* detail, size_t n) {
     // The cabinet drives which slots a panel sweep walks, and 40/64/80 are
     // the shapes that exist — a number in between would light slots that do
     // not, which reads as a dead row rather than a typo.
+    // HHMM is a clock reading, not a number: 0790 is not a time.
+    if ((_staged.sched_reset_hhmm % 100) > 59) {
+        snprintf(detail, n, "sched.reset_hhmm=HHMM_minutes_0-59");
+        return -1;
+    }
     if (_staged.panel_cabinet != 40 && _staged.panel_cabinet != 64 &&
         _staged.panel_cabinet != 80) {
         snprintf(detail, n, "panel.cabinet=40|64|80");
@@ -465,6 +483,7 @@ void gwConfig_applyLive() {
     rtu_setHub(_active.hub_map, _active.hub_retry, _active.hub_gap_ms,
                _active.hub_settle_ms, _active.hub_budget_ms);
     panel_applyConfig();
+    sched_applyConfig();
     usbBridge_setFraming(_active.usb_gap_ms, _active.usb_max_ms);
     RS485.end();
     RS485.setDelays(_active.rs485_pre_us, _active.rs485_post_us);
@@ -485,8 +504,9 @@ bool gwConfig_commit(char* applied, size_t appliedN,
 
     // Collect what will change before active is overwritten. Grouping by key
     // prefix keeps this honest as keys are added.
-    bool live[5] = { false, false, false, false, false };
-    static const char* GROUP[5] = { "rs485", "usb", "net", "bus", "panel" };
+    bool live[6] = { false, false, false, false, false, false };
+    static const char* GROUP[6] = { "rs485", "usb", "net", "bus", "panel",
+                                    "sched" };
     size_t pos = 0;
     if (pendingN) pending[0] = '\0';
     for (int i = 0; i < KEY_N; i++) {
@@ -497,7 +517,7 @@ bool gwConfig_commit(char* applied, size_t appliedN,
             continue;
         }
         const char* name = gwConfig_keyName(i);
-        for (int g = 0; g < 5; g++) {
+        for (int g = 0; g < 6; g++) {
             size_t n = strlen(GROUP[g]);
             if (strncmp(name, GROUP[g], n) == 0 && name[n] == '.') live[g] = true;
         }
@@ -514,7 +534,7 @@ bool gwConfig_commit(char* applied, size_t appliedN,
 
     size_t ap = 0;
     if (appliedN) applied[0] = '\0';
-    for (int g = 0; g < 5; g++) {
+    for (int g = 0; g < 6; g++) {
         if (!live[g]) continue;
         ap += snprintf(applied + ap, (ap < appliedN) ? appliedN - ap : 0,
                        "%s%s", ap ? "," : "", GROUP[g]);

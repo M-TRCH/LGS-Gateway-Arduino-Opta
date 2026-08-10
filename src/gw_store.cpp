@@ -11,7 +11,8 @@
 // v2: panel_lamp_out[3] (which output a colour is on) became panel_out[3]
 // (what each output follows) — same three bytes, different question, and a
 // stored 2,3,4 silently read back as busy/fault/link.
-#define GW_BLOB_SCHEMA  2
+// v3: the scheduler's three fields were appended.
+#define GW_BLOB_SCHEMA  3
 #define GW_KVSTORE_PARTITION 3
 #define GW_KEY          "gwcfg"
 

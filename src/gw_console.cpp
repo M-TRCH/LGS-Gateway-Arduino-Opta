@@ -4,6 +4,7 @@
 
 #include "gw_config.h"
 #include "modbus_rtu.h"
+#include "panel.h"
 #include "gw_status.h"
 #include "gw_store.h"
 #include "net_runtime.h"
@@ -108,9 +109,12 @@ static void doInfo() {
     emitf("#DATA hub.cross=%lu hub.extra=%lu hub.wait_ms=%lu hub.skip=%lu",
           (unsigned long)rtu_hubCross(), (unsigned long)rtu_hubExtra(),
           (unsigned long)rtu_hubWaitMs(), (unsigned long)rtu_hubSkip());
+    emitf("#DATA panel.state=%s panel.step=%u/%u panel.in=0x%02X",
+          panel_stateName(), panel_progress(), panel_total(),
+          (unsigned)panel_inputMask());
     emitf("#DATA rtt.last_ms=%u rtt.max_ms=%u rtt.consec_timeout=%u",
           gwStatus_lastRttMs(), gwStatus_maxRttMs(), gwStatus_consecutiveTimeouts());
-    emitf("#OK INFO n=9");
+    emitf("#OK INFO n=10");
 }
 
 static void doHelp() {

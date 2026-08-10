@@ -9,6 +9,7 @@
 #include "gw_store.h"
 #include "net_runtime.h"
 #include "tcp_bridge.h"
+#include "panel.h"
 #include "usb_bridge.h"
 #include "version.h"
 
@@ -66,6 +67,7 @@ void setup() {
     // From here the bridge is live. Everything above is bounded; everything
     // below is optional. This ordering is the whole safety story: no stored
     // value and no storage failure can cost the USB bridge.
+    panel_begin();
     usbBridge_begin();
     gwConsole_begin();
     digitalWrite(USB_MODE_LED_PIN, HIGH);
@@ -89,6 +91,7 @@ void loop() {
     netRuntime_update();
     if (netRuntime_isUp()) tcpBridge_update();
     gwStatus_update();
+    panel_update();
 
     if (!_healthyMarked && millis() > HEALTHY_AFTER_MS) {
         gwStatus_markHealthy();

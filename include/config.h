@@ -91,4 +91,16 @@ extern bool g_logEnabled;
 // repairs itself in-line.
 #define DEF_HUB_BUDGET_MS    1400
 
+// ── Factory defaults: front-panel buttons ──────────────────────────────────
+// Off until a site says otherwise: a gateway on a bench has nothing wired to
+// its inputs, and a stray voltage there must not sweep somebody's cabinet.
+#define DEF_PANEL_ENABLED    0
+#define DEF_PANEL_CABINET    64
+// Slot to slot. The bus itself costs ~100 ms a slot, so this is only extra
+// breathing room; 0 runs as fast as the bus allows.
+#define DEF_PANEL_STEP_MS    0
+// Both relays drop for this long on a reset press. Long enough that the
+// modules' rails actually collapse, short enough not to look like a fault.
+#define DEF_PANEL_RESET_MS   1500
+
 #endif // CONFIG_H

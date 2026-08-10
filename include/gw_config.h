@@ -54,6 +54,13 @@ struct GwConfig {
     uint32_t net_dns;
     uint16_t net_port;
     uint16_t net_link_timeout_ms;
+    // Front-panel test buttons (see panel.h). Which colour does what is a
+    // site decision, so all five are configurable; 0 = the button is unused.
+    uint8_t  panel_enabled;
+    uint8_t  panel_btn[5];              // inputs 1-5 -> PanelAction
+    uint16_t panel_cabinet;             // 40 / 64 / 80, the sweep's slot list
+    uint16_t panel_step_ms;             // pacing between slots in a sweep
+    uint16_t panel_reset_ms;            // how long the relays stay dropped
 };
 
 enum class GwSource : uint8_t { STORED, DEFAULTS, CORRUPT, UNAVAILABLE, MIGRATED };

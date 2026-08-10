@@ -1,4 +1,5 @@
 #include "gw_config.h"
+#include "panel.h"
 
 #include "gw_status.h"
 #include "gw_store.h"
@@ -41,6 +42,15 @@ static const KeyDef KEYS[] = {
     { "bus.hub_gap_ms",       KIND_U16,  0, 1000,       false },
     { "bus.hub_budget_ms",    KIND_U16,  0, 4000,       false },
     { "bus.hub_settle_ms",    KIND_U16,  200, 5000,     false },
+    { "panel.enabled",        KIND_BOOL, 0, 1,          false },
+    { "panel.cabinet",        KIND_U16,  40, 80,        false },
+    { "panel.btn1",           KIND_U16,  0, 4,          false },
+    { "panel.btn2",           KIND_U16,  0, 4,          false },
+    { "panel.btn3",           KIND_U16,  0, 4,          false },
+    { "panel.btn4",           KIND_U16,  0, 4,          false },
+    { "panel.btn5",           KIND_U16,  0, 4,          false },
+    { "panel.step_ms",        KIND_U16,  0, 2000,       false },
+    { "panel.reset_ms",       KIND_U16,  200, 10000,    false },
 };
 static const int KEY_N = (int)(sizeof(KEYS) / sizeof(KEYS[0]));
 
@@ -76,6 +86,18 @@ static void defaults(GwConfig& c) {
     c.hub_settle_ms        = DEF_HUB_SETTLE_MS;
     c.hub_gap_ms           = DEF_HUB_GAP_MS;
     c.hub_budget_ms        = DEF_HUB_BUDGET_MS;
+    // Panel buttons: red lights the cabinet, green clears it, blue adds the
+    // latch, white power-cycles it. Yellow is left unassigned until a site
+    // says what it is for.
+    c.panel_enabled        = DEF_PANEL_ENABLED;
+    c.panel_cabinet        = DEF_PANEL_CABINET;
+    c.panel_btn[0]         = 1;    // red    -> all_on
+    c.panel_btn[1]         = 2;    // green  -> all_off
+    c.panel_btn[2]         = 3;    // blue   -> all_unlock
+    c.panel_btn[3]         = 0;    // yellow -> unassigned
+    c.panel_btn[4]         = 4;    // white  -> reset
+    c.panel_step_ms        = DEF_PANEL_STEP_MS;
+    c.panel_reset_ms       = DEF_PANEL_RESET_MS;
 }
 
 static bool parseIp(const char* s, uint32_t* out) {
@@ -123,6 +145,15 @@ static uint32_t valueOf(const GwConfig& c, int i) {
         case 19: return c.hub_gap_ms;
         case 20: return c.hub_budget_ms;
         case 21: return c.hub_settle_ms;
+        case 22: return c.panel_enabled;
+        case 23: return c.panel_cabinet;
+        case 24: return c.panel_btn[0];
+        case 25: return c.panel_btn[1];
+        case 26: return c.panel_btn[2];
+        case 27: return c.panel_btn[3];
+        case 28: return c.panel_btn[4];
+        case 29: return c.panel_step_ms;
+        case 30: return c.panel_reset_ms;
         default: return 0;
     }
 }
@@ -148,6 +179,15 @@ static void storeValue(GwConfig& c, int i, uint32_t v) {
         case 19: c.hub_gap_ms          = (uint16_t)v; break;
         case 20: c.hub_budget_ms       = (uint16_t)v; break;
         case 21: c.hub_settle_ms       = (uint16_t)v; break;
+        case 22: c.panel_enabled       = (uint8_t)v; break;
+        case 23: c.panel_cabinet       = (uint16_t)v; break;
+        case 24: c.panel_btn[0]        = (uint8_t)v; break;
+        case 25: c.panel_btn[1]        = (uint8_t)v; break;
+        case 26: c.panel_btn[2]        = (uint8_t)v; break;
+        case 27: c.panel_btn[3]        = (uint8_t)v; break;
+        case 28: c.panel_btn[4]        = (uint8_t)v; break;
+        case 29: c.panel_step_ms       = (uint16_t)v; break;
+        case 30: c.panel_reset_ms      = (uint16_t)v; break;
         default: break;
     }
 }
@@ -380,6 +420,14 @@ static bool contiguousMask(uint32_t m) {
 }
 
 int gwConfig_validateStaged(char* detail, size_t n) {
+    // The cabinet drives which slots a panel sweep walks, and 40/64/80 are
+    // the shapes that exist — a number in between would light slots that do
+    // not, which reads as a dead row rather than a typo.
+    if (_staged.panel_cabinet != 40 && _staged.panel_cabinet != 64 &&
+        _staged.panel_cabinet != 80) {
+        snprintf(detail, n, "panel.cabinet=40|64|80");
+        return -1;
+    }
     const GwConfig& c = _staged;
 
     if (c.rs485_t2_ms >= c.rs485_t1_ms) {
@@ -416,6 +464,7 @@ void gwConfig_applyLive() {
     rtu_setTimeouts(_active.rs485_t1_ms, _active.rs485_t2_ms);
     rtu_setHub(_active.hub_map, _active.hub_retry, _active.hub_gap_ms,
                _active.hub_settle_ms, _active.hub_budget_ms);
+    panel_applyConfig();
     usbBridge_setFraming(_active.usb_gap_ms, _active.usb_max_ms);
     RS485.end();
     RS485.setDelays(_active.rs485_pre_us, _active.rs485_post_us);
@@ -436,8 +485,8 @@ bool gwConfig_commit(char* applied, size_t appliedN,
 
     // Collect what will change before active is overwritten. Grouping by key
     // prefix keeps this honest as keys are added.
-    bool live[4] = { false, false, false, false };   // rs485, usb, net, bus
-    static const char* GROUP[4] = { "rs485", "usb", "net", "bus" };
+    bool live[5] = { false, false, false, false, false };
+    static const char* GROUP[5] = { "rs485", "usb", "net", "bus", "panel" };
     size_t pos = 0;
     if (pendingN) pending[0] = '\0';
     for (int i = 0; i < KEY_N; i++) {
@@ -448,7 +497,7 @@ bool gwConfig_commit(char* applied, size_t appliedN,
             continue;
         }
         const char* name = gwConfig_keyName(i);
-        for (int g = 0; g < 4; g++) {
+        for (int g = 0; g < 5; g++) {
             size_t n = strlen(GROUP[g]);
             if (strncmp(name, GROUP[g], n) == 0 && name[n] == '.') live[g] = true;
         }
@@ -465,7 +514,7 @@ bool gwConfig_commit(char* applied, size_t appliedN,
 
     size_t ap = 0;
     if (appliedN) applied[0] = '\0';
-    for (int g = 0; g < 4; g++) {
+    for (int g = 0; g < 5; g++) {
         if (!live[g]) continue;
         ap += snprintf(applied + ap, (ap < appliedN) ? appliedN - ap : 0,
                        "%s%s", ap ? "," : "", GROUP[g]);

@@ -34,6 +34,10 @@ static uint32_t _resetUntil = 0;
 // Lamps
 static uint8_t  _lamp = LAMP_RED;      // red until the first decision
 static uint32_t _lampSince = 0;
+static uint8_t  _lampsOn = 1;
+static uint16_t _lampHoldMs = DEF_PANEL_LAMP_HOLD_MS;
+static uint16_t _lampDwellMs = DEF_PANEL_LAMP_DWELL_MS;
+static uint16_t _lampDead = DEF_PANEL_LAMP_DEAD;
 
 // ── Cabinet shapes ─────────────────────────────────────────────────────────
 // The number in an LGS name is the slot count. 40 and 80 are plain blocks;
@@ -147,6 +151,15 @@ void panel_applyConfig() {
     _cabinet = c.panel_cabinet;
     _stepMs = c.panel_step_ms;
     _resetMs = c.panel_reset_ms;
+    _lampHoldMs = c.panel_lamp_hold_ms;
+    _lampDwellMs = c.panel_lamp_dwell_ms;
+    _lampDead = c.panel_lamp_dead;
+    if (_lampsOn && !c.panel_lamps) {   // switched off: leave nothing lit
+        digitalWrite(PANEL_LAMP_GREEN, LOW);
+        digitalWrite(PANEL_LAMP_YELLOW, LOW);
+        digitalWrite(PANEL_LAMP_RED, LOW);
+    }
+    _lampsOn = c.panel_lamps;
     for (int i = 0; i < PANEL_BUTTONS; i++) {
         _action[i] = c.panel_btn[i] > PANEL_ACTION_MAX ? PANEL_NONE : c.panel_btn[i];
     }
@@ -157,11 +170,11 @@ static uint8_t lampWanted(uint32_t now) {
     if (_resetUntil) return LAMP_RED;
     if (gwStatus_safeMode() || !gwStore_available()) return LAMP_RED;
     if (gwConfig_active().net_enabled && !netRuntime_isUp()) return LAMP_RED;
-    if (gwStatus_consecutiveTimeouts() >= PANEL_LAMP_DEAD_TIMEOUTS) return LAMP_RED;
+    if (gwStatus_consecutiveTimeouts() >= _lampDead) return LAMP_RED;
 
     if (_running != PANEL_NONE) return LAMP_AMBER;
     const uint32_t last = gwStatus_lastRs485Ms();
-    if (last && now - last < PANEL_LAMP_ACTIVITY_MS) return LAMP_AMBER;
+    if (last && now - last < _lampHoldMs) return LAMP_AMBER;
 
     return LAMP_GREEN;
 }
@@ -173,10 +186,11 @@ static void lampApply(uint8_t lamp) {
 }
 
 static void lampUpdate(uint32_t now) {
+    if (!_lampsOn) return;              // outputs left exactly as they are
     const uint8_t want = lampWanted(now);
     if (want == _lamp) return;
     // Relays, not LEDs: never switch faster than the dwell.
-    if (now - _lampSince < PANEL_LAMP_DWELL_MS) return;
+    if (now - _lampSince < _lampDwellMs) return;
     _lamp = want;
     _lampSince = now;
     lampApply(_lamp);
@@ -241,6 +255,7 @@ void panel_update() {
 }
 
 const char* panel_lampName() {
+    if (!_lampsOn) return "off";
     switch (_lamp) {
         case LAMP_AMBER: return "amber";
         case LAMP_RED:   return "red";

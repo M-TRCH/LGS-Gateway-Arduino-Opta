@@ -61,6 +61,13 @@ struct GwConfig {
     uint16_t panel_cabinet;             // 40 / 64 / 80, the sweep's slot list
     uint16_t panel_step_ms;             // pacing between slots in a sweep
     uint16_t panel_reset_ms;            // how long the relays stay dropped
+    // Status lamps. The meanings are fixed — green ready, amber talking, red
+    // not usable — but when each one applies is a site's call: how busy a bus
+    // has to look before amber holds, and how dead before red.
+    uint8_t  panel_lamps;               // 0 = leave the lamp outputs alone
+    uint16_t panel_lamp_hold_ms;        // traffic this recent keeps amber on
+    uint16_t panel_lamp_dwell_ms;       // minimum time between lamp changes
+    uint16_t panel_lamp_dead;           // consecutive timeouts before red
 };
 
 enum class GwSource : uint8_t { STORED, DEFAULTS, CORRUPT, UNAVAILABLE, MIGRATED };

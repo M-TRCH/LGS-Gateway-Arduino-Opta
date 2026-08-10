@@ -51,6 +51,10 @@ static const KeyDef KEYS[] = {
     { "panel.btn5",           KIND_U16,  0, 4,          false },
     { "panel.step_ms",        KIND_U16,  0, 2000,       false },
     { "panel.reset_ms",       KIND_U16,  200, 10000,    false },
+    { "panel.lamps",          KIND_BOOL, 0, 1,          false },
+    { "panel.lamp_hold_ms",   KIND_U16,  100, 5000,     false },
+    { "panel.lamp_dwell_ms",  KIND_U16,  100, 2000,     false },
+    { "panel.lamp_dead",      KIND_U16,  1, 100,        false },
 };
 static const int KEY_N = (int)(sizeof(KEYS) / sizeof(KEYS[0]));
 
@@ -98,6 +102,10 @@ static void defaults(GwConfig& c) {
     c.panel_btn[4]         = 4;    // white  -> reset
     c.panel_step_ms        = DEF_PANEL_STEP_MS;
     c.panel_reset_ms       = DEF_PANEL_RESET_MS;
+    c.panel_lamps          = DEF_PANEL_LAMPS;
+    c.panel_lamp_hold_ms   = DEF_PANEL_LAMP_HOLD_MS;
+    c.panel_lamp_dwell_ms  = DEF_PANEL_LAMP_DWELL_MS;
+    c.panel_lamp_dead      = DEF_PANEL_LAMP_DEAD;
 }
 
 static bool parseIp(const char* s, uint32_t* out) {
@@ -154,6 +162,10 @@ static uint32_t valueOf(const GwConfig& c, int i) {
         case 28: return c.panel_btn[4];
         case 29: return c.panel_step_ms;
         case 30: return c.panel_reset_ms;
+        case 31: return c.panel_lamps;
+        case 32: return c.panel_lamp_hold_ms;
+        case 33: return c.panel_lamp_dwell_ms;
+        case 34: return c.panel_lamp_dead;
         default: return 0;
     }
 }
@@ -188,6 +200,10 @@ static void storeValue(GwConfig& c, int i, uint32_t v) {
         case 28: c.panel_btn[4]        = (uint8_t)v; break;
         case 29: c.panel_step_ms       = (uint16_t)v; break;
         case 30: c.panel_reset_ms      = (uint16_t)v; break;
+        case 31: c.panel_lamps         = (uint8_t)v; break;
+        case 32: c.panel_lamp_hold_ms  = (uint16_t)v; break;
+        case 33: c.panel_lamp_dwell_ms = (uint16_t)v; break;
+        case 34: c.panel_lamp_dead     = (uint16_t)v; break;
         default: break;
     }
 }

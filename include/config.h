@@ -117,11 +117,12 @@ extern bool g_logEnabled;
 // to stand next to. So traffic holds the amber lamp for a window rather than
 // pulsing it, and no lamp may change state faster than the dwell — under a
 // server polling steadily the amber simply stays on.
-#define PANEL_LAMP_ACTIVITY_MS  600     // traffic this recent counts as "talking"
-#define PANEL_LAMP_DWELL_MS     400     // minimum time between lamp changes
+#define DEF_PANEL_LAMPS         1       // lamps follow the gateway by default
+#define DEF_PANEL_LAMP_HOLD_MS  600     // traffic this recent counts as "talking"
+#define DEF_PANEL_LAMP_DWELL_MS 400     // minimum time between lamp changes
 // Consecutive RS485 timeouts before the bus is called dead. A hub channel
 // change costs one timeout and then answers, so this sits well above the
 // noise of normal operation.
-#define PANEL_LAMP_DEAD_TIMEOUTS 10
+#define DEF_PANEL_LAMP_DEAD      10
 
 #endif // CONFIG_H

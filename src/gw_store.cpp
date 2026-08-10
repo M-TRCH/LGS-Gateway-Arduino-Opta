@@ -7,7 +7,11 @@
 #include "gw_config.h"
 
 #define GW_BLOB_MAGIC   0x4353474CUL      // 'L','G','S','C' little-endian
-#define GW_BLOB_SCHEMA  1
+// Bump whenever a field's MEANING changes without the struct changing size.
+// v2: panel_lamp_out[3] (which output a colour is on) became panel_out[3]
+// (what each output follows) — same three bytes, different question, and a
+// stored 2,3,4 silently read back as busy/fault/link.
+#define GW_BLOB_SCHEMA  2
 #define GW_KVSTORE_PARTITION 3
 #define GW_KEY          "gwcfg"
 
@@ -88,8 +92,9 @@ GwStoreStatus gwStore_load(GwConfig& out) {
         _lastError = "record unreadable";
         return GwStoreStatus::CORRUPT;
     }
-    if (blob.magic != GW_BLOB_MAGIC || blob.size != sizeof(GwConfig)) {
-        _lastError = "magic/size mismatch";
+    if (blob.magic != GW_BLOB_MAGIC || blob.size != sizeof(GwConfig) ||
+        blob.schema != GW_BLOB_SCHEMA) {
+        _lastError = "magic/size/schema mismatch";
         return GwStoreStatus::CORRUPT;
     }
     uint32_t want = crc32_of((const uint8_t*)&blob, offsetof(GwBlob, crc32));

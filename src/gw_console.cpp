@@ -121,14 +121,16 @@ static void doInfo() {
 // gated on HELLO: it changes nothing that outlives the timeout, and needing a
 // session to test a lamp is friction with no safety in it.
 static void doLamp(char** argv, int argc) {
-    if (argc < 1) { emit("#ERR LAMP err=syntax want=green|amber|red|off"); return; }
+    if (argc < 1) { emit("#ERR LAMP err=syntax want=2|3|4|off"); return; }
     uint8_t lamp;
-    if      (!strcasecmp(argv[0], "green")) lamp = LAMP_GREEN;
-    else if (!strcasecmp(argv[0], "amber") ||
-             !strcasecmp(argv[0], "yellow")) lamp = LAMP_AMBER;
-    else if (!strcasecmp(argv[0], "red"))   lamp = LAMP_RED;
-    else if (!strcasecmp(argv[0], "off"))   lamp = PANEL_LAMP_OFF;
-    else { emit("#ERR LAMP err=range want=green|amber|red|off"); return; }
+    if (!strcasecmp(argv[0], "off")) lamp = PANEL_LAMP_OFF;
+    else {
+        lamp = (uint8_t)strtoul(argv[0], nullptr, 10);
+        if (lamp < 2 || lamp > 4) {
+            emit("#ERR LAMP err=range want=2|3|4|off");
+            return;
+        }
+    }
     uint32_t ms = (argc >= 2) ? (uint32_t)strtoul(argv[1], nullptr, 10) : 5000UL;
     if (ms < 200UL)   ms = 200UL;
     if (ms > 60000UL) ms = 60000UL;

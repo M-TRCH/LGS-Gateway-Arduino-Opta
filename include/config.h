@@ -127,10 +127,12 @@ extern bool g_logEnabled;
 // change costs one timeout and then answers, so this sits well above the
 // noise of normal operation.
 #define DEF_PANEL_LAMP_DEAD      10
-// Which output each colour is wired to, as the panel was built. Output 1 is
-// the shelf's power relay and is never a lamp; 0 = that colour is not fitted.
-#define DEF_PANEL_LAMP_OUT_GREEN 2
-#define DEF_PANEL_LAMP_OUT_AMBER 3
-#define DEF_PANEL_LAMP_OUT_RED   4
+// What each output follows, as the panel was first described: green on O2 is
+// "ready", amber on O3 is "busy", red on O4 is "not usable". Mapping the
+// three state sources to three outputs is what makes it a traffic light; see
+// PanelSource in panel.h for what else an output can follow.
+#define DEF_PANEL_OUT2       1      // SRC_READY
+#define DEF_PANEL_OUT3       2      // SRC_BUSY
+#define DEF_PANEL_OUT4       3      // SRC_FAULT
 
 #endif // CONFIG_H

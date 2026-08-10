@@ -3,6 +3,7 @@
 #include "gw_status.h"
 #include "gw_store.h"
 #include "net_runtime.h"
+#include "tcp_bridge.h"
 
 // Inputs 1-5 on the Opta terminal block. Red, green, blue, yellow, white in
 // the order they are wired; what each one does is configuration.
@@ -31,29 +32,28 @@ static uint16_t _total = 0;
 static uint32_t _nextStepAt = 0;
 static uint32_t _resetUntil = 0;
 
-// Lamps
-static uint8_t  _lamp = LAMP_RED;      // red until the first decision
-static uint32_t _lampSince = 0;
+// Lamps. Each of outputs 2-4 follows whatever it is mapped to; the three
+// state sources (ready/busy/fault) are mutually exclusive, so mapping them to
+// three outputs gives a traffic light, while the rest are plain facts.
+static uint8_t  _outSrc[PANEL_OUTPUTS] = { DEF_PANEL_OUT2, DEF_PANEL_OUT3,
+                                           DEF_PANEL_OUT4 };
+static uint8_t  _outLit[PANEL_OUTPUTS] = {0};
+static uint32_t _outSince[PANEL_OUTPUTS] = {0};
 static uint8_t  _lampsOn = 1;
 static uint16_t _lampHoldMs = DEF_PANEL_LAMP_HOLD_MS;
 static uint16_t _lampDwellMs = DEF_PANEL_LAMP_DWELL_MS;
 static uint16_t _lampDead = DEF_PANEL_LAMP_DEAD;
-// Which Opta output each colour hangs off (green, amber, red), 0 = not fitted.
-static uint8_t  _lampOut[3] = { DEF_PANEL_LAMP_OUT_GREEN,
-                                DEF_PANEL_LAMP_OUT_AMBER,
-                                DEF_PANEL_LAMP_OUT_RED };
-static void lampApply(uint8_t lamp);    // defined with the rest of the lamp code
-static uint8_t  _forceLamp = 0xFF;      // 0xFF = follow the gateway's state
+static void outWrite(uint8_t i, bool on);  // defined with the lamp logic
+static uint8_t  _forceOut = 0xFF;       // 0xFF = outputs follow their mapping
 static uint32_t _forceUntil = 0;
 
-// Output number as wired on the terminal block -> the pin that drives it.
-// O1 is the shelf's power and is never a lamp; gw_config refuses it.
-static int lampPin(uint8_t out) {
-    switch (out) {
-        case 2:  return PANEL_OUT_2;
-        case 3:  return PANEL_OUT_3;
-        case 4:  return PANEL_OUT_4;
-        default: return -1;
+// Index 0,1,2 -> outputs 2,3,4 on the terminal block. O1 is the shelf's
+// power and is never a lamp.
+static int outPin(uint8_t i) {
+    switch (i) {
+        case 0:  return PANEL_OUT_2;
+        case 1:  return PANEL_OUT_3;
+        default: return PANEL_OUT_4;
     }
 }
 
@@ -173,66 +173,74 @@ void panel_applyConfig() {
     _lampDwellMs = c.panel_lamp_dwell_ms;
     _lampDead = c.panel_lamp_dead;
     if (_lampsOn && !c.panel_lamps) {   // switched off: leave nothing lit
-        lampApply(0xFF);                // no colour matches: all three out
+        for (uint8_t i = 0; i < PANEL_OUTPUTS; i++) outWrite(i, false);
     }
     _lampsOn = c.panel_lamps;
-    for (uint8_t i = 0; i < 3; i++) {
-        _lampOut[i] = c.panel_lamp_out[i];
-        const int pin = lampPin(_lampOut[i]);
-        if (pin >= 0) pinMode(pin, OUTPUT);
+    for (uint8_t i = 0; i < PANEL_OUTPUTS; i++) {
+        _outSrc[i] = c.panel_out[i] > SRC_MAX ? SRC_NONE : c.panel_out[i];
+        _outSince[i] = 0;               // a remapped output may light at once
     }
-    if (_lampsOn) lampApply(_lamp);     // a remapped colour lights straight away
     for (int i = 0; i < PANEL_BUTTONS; i++) {
         _action[i] = c.panel_btn[i] > PANEL_ACTION_MAX ? PANEL_NONE : c.panel_btn[i];
     }
 }
 
-// Which lamp the gateway's state calls for, worst news first.
-static uint8_t lampWanted(uint32_t now) {
-    if (_resetUntil) return LAMP_RED;
-    if (gwStatus_safeMode() || !gwStore_available()) return LAMP_RED;
-    if (gwConfig_active().net_enabled && !netRuntime_isUp()) return LAMP_RED;
-    if (gwStatus_consecutiveTimeouts() >= _lampDead) return LAMP_RED;
-
-    if (_running != PANEL_NONE) return LAMP_AMBER;
+// The gateway's one state, worst news first. Reported as three separate
+// sources so a panel can show all three, or only the one it has a lamp for.
+static uint8_t gatewayState(uint32_t now) {
+    if (_resetUntil) return SRC_FAULT;
+    if (gwStatus_safeMode() || !gwStore_available()) return SRC_FAULT;
+    if (gwConfig_active().net_enabled && !netRuntime_isUp()) return SRC_FAULT;
+    if (gwStatus_consecutiveTimeouts() >= _lampDead) return SRC_FAULT;
+    if (_running != PANEL_NONE) return SRC_BUSY;
     const uint32_t last = gwStatus_lastRs485Ms();
-    if (last && now - last < _lampHoldMs) return LAMP_AMBER;
-
-    return LAMP_GREEN;
+    if (last && now - last < _lampHoldMs) return SRC_BUSY;
+    return SRC_READY;
 }
 
-static void lampApply(uint8_t lamp) {
-    for (uint8_t i = 0; i < 3; i++) {
-        const int pin = lampPin(_lampOut[i]);
-        if (pin < 0) continue;              // colour not fitted
-        digitalWrite(pin, (i == lamp) ? HIGH : LOW);
+static bool sourceTrue(uint8_t src, uint8_t state) {
+    switch (src) {
+        case SRC_READY:  return state == SRC_READY;
+        case SRC_BUSY:   return state == SRC_BUSY;
+        case SRC_FAULT:  return state == SRC_FAULT;
+        case SRC_LINK:   return netRuntime_isUp();
+        case SRC_CLIENT: return tcpBridge_hasClient();
+        case SRC_SWEEP:  return _running != PANEL_NONE;
+        case SRC_RESET:  return _resetUntil != 0;
+        default:         return false;      // SRC_NONE
     }
+}
+
+static void outWrite(uint8_t i, bool on) {
+    _outLit[i] = on ? 1 : 0;
+    digitalWrite(outPin(i), on ? HIGH : LOW);
 }
 
 static void lampUpdate(uint32_t now) {
-    if (_forceLamp != 0xFF) {           // a wiring check is in progress
+    if (_forceOut != 0xFF) {            // a wiring check is in progress
         if ((int32_t)(now - _forceUntil) < 0) return;
-        _forceLamp = 0xFF;              // expired: fall back to the real state
-        _lampSince = 0;                 // and let it show immediately
+        _forceOut = 0xFF;               // expired: hand the outputs back
+        for (uint8_t i = 0; i < PANEL_OUTPUTS; i++) _outSince[i] = 0;
     }
     if (!_lampsOn) return;              // outputs left exactly as they are
-    const uint8_t want = lampWanted(now);
-    if (want == _lamp) return;
-    // Relays, not LEDs: never switch faster than the dwell.
-    if (now - _lampSince < _lampDwellMs) return;
-    _lamp = want;
-    _lampSince = now;
-    lampApply(_lamp);
+
+    const uint8_t state = gatewayState(now);
+    for (uint8_t i = 0; i < PANEL_OUTPUTS; i++) {
+        const bool want = sourceTrue(_outSrc[i], state);
+        if (want == (bool)_outLit[i]) continue;
+        // Relays, not LEDs: never switch one faster than the dwell.
+        if (_outSince[i] && now - _outSince[i] < _lampDwellMs) continue;
+        _outSince[i] = now;
+        outWrite(i, want);
+    }
 }
 
 void panel_begin() {
-    for (uint8_t i = 0; i < 3; i++) {
-        const int pin = lampPin(_lampOut[i]);
-        if (pin >= 0) pinMode(pin, OUTPUT);
+    for (uint8_t i = 0; i < PANEL_OUTPUTS; i++) {
+        pinMode(outPin(i), OUTPUT);
+        outWrite(i, false);         // dark until the first decision
+        _outSince[i] = 0;
     }
-    _lamp = LAMP_RED;               // until the first decision says otherwise
-    _lampSince = millis();
-    lampApply(_lamp);
 
     for (int i = 0; i < PANEL_BUTTONS; i++) {
         pinMode(PANEL_PIN[i], INPUT);
@@ -284,27 +292,42 @@ void panel_update() {
     lampUpdate(now);
 }
 
-void panel_forceLamp(uint8_t lamp, uint32_t ms) {
-    _forceLamp = lamp;
+void panel_forceLamp(uint8_t out, uint32_t ms) {
+    _forceOut = out;
     _forceUntil = millis() + ms;
-    lampApply(lamp == PANEL_LAMP_OFF ? 0xFF : lamp);
+    for (uint8_t i = 0; i < PANEL_OUTPUTS; i++) {
+        outWrite(i, out != PANEL_LAMP_OFF && (uint8_t)(i + 2) == out);
+    }
 }
 
+const char* panel_sourceName(uint8_t source) {
+    switch (source) {
+        case SRC_READY:  return "ready";
+        case SRC_BUSY:   return "busy";
+        case SRC_FAULT:  return "fault";
+        case SRC_LINK:   return "link";
+        case SRC_CLIENT: return "client";
+        case SRC_SWEEP:  return "sweep";
+        case SRC_RESET:  return "reset";
+        default:         return "none";
+    }
+}
+
+// "234" with a dash for each output that is dark, so one glance at INFO says
+// what the panel is showing: "-3-" is the middle lamp only.
 const char* panel_lampName() {
-    if (_forceLamp == PANEL_LAMP_OFF) return "forced-off";
-    if (_forceLamp != 0xFF) {
-        switch (_forceLamp) {
-            case LAMP_AMBER: return "forced-amber";
-            case LAMP_RED:   return "forced-red";
-            default:         return "forced-green";
-        }
-    }
+    static char buf[8];
     if (!_lampsOn) return "off";
-    switch (_lamp) {
-        case LAMP_AMBER: return "amber";
-        case LAMP_RED:   return "red";
-        default:         return "green";
+    for (uint8_t i = 0; i < PANEL_OUTPUTS; i++) {
+        buf[i] = _outLit[i] ? (char)('2' + i) : '-';
     }
+    buf[PANEL_OUTPUTS] = ' ';
+    if (_forceOut != 0xFF) {
+        static char forced[16];
+        snprintf(forced, sizeof(forced), "forced:%s", buf);
+        return forced;
+    }
+    return buf;
 }
 
 const char* panel_actionName(uint8_t action) {

@@ -47,21 +47,38 @@ enum PanelAction : uint8_t {
  *  the cabinet the panel shows amber, and green means "ready and nobody is
  *  asking". That is what the colours were asked to mean.
  */
-enum PanelLamp : uint8_t {
-    LAMP_GREEN = 0,
-    LAMP_AMBER = 1,
-    LAMP_RED   = 2,
+/*  What lights an output. Each of outputs 2-4 is mapped to one of these
+ *  (`panel.out2` / `out3` / `out4`), so the panel's colours mean whatever the
+ *  site wired and decided rather than whatever the firmware assumed.
+ *
+ *  READY / BUSY / FAULT are the three faces of one state, so mapping them to
+ *  three outputs gives a traffic light: exactly one is lit, worst first. The
+ *  rest are plain facts and may be lit alongside anything.
+ */
+enum PanelSource : uint8_t {
+    SRC_NONE     = 0,   // output left off
+    SRC_READY    = 1,   // no fault, and nothing is talking
+    SRC_BUSY     = 2,   // talking to the cabinet, or a sweep is running
+    SRC_FAULT    = 3,   // resetting, safe mode, no store, link down, bus dead
+    SRC_LINK     = 4,   // the LAN is up
+    SRC_CLIENT   = 5,   // a Modbus TCP client is connected
+    SRC_SWEEP    = 6,   // a panel sweep is running
+    SRC_RESET    = 7,   // the shelf's power is dropped right now
+    SRC_MAX      = 7,
 };
 
-const char* panel_lampName();
+#define PANEL_OUTPUTS   3           // outputs 2, 3, 4
 
-/*  Force a lamp on for `ms`, ignoring what the gateway's state would ask for.
- *  This is how the panel's wiring is checked at the cabinet: drive each
- *  colour in turn and watch. `lamp` is a PanelLamp, or PANEL_LAMP_OFF for
- *  all three out. Expires on its own, so a console session that walks away
+const char* panel_sourceName(uint8_t source);
+const char* panel_lampName();       // which outputs are lit, e.g. "-2-" or "off"
+
+/*  Force one output on for `ms`, ignoring what it is mapped to. This is how
+ *  the panel's wiring is checked at the cabinet: drive each output in turn
+ *  and watch which lamp answers. `out` is 2-4, or PANEL_LAMP_OFF for all
+ *  three off. Expires on its own, so a console session that walks away
  *  cannot leave the panel lying. */
 #define PANEL_LAMP_OFF  0xFE
-void panel_forceLamp(uint8_t lamp, uint32_t ms);
+void panel_forceLamp(uint8_t out, uint32_t ms);
 
 void panel_begin();
 void panel_update();

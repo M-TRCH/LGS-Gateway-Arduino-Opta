@@ -61,17 +61,17 @@ struct GwConfig {
     uint16_t panel_cabinet;             // 40 / 64 / 80, the sweep's slot list
     uint16_t panel_step_ms;             // pacing between slots in a sweep
     uint16_t panel_reset_ms;            // how long the relays stay dropped
-    // Status lamps. The meanings are fixed — green ready, amber talking, red
-    // not usable — but when each one applies is a site's call: how busy a bus
-    // has to look before amber holds, and how dead before red.
+    // Status lamps. What each output follows is mapped below; these decide
+    // when the underlying state changes — how busy a bus has to look before
+    // it counts as busy, and how dead before it counts as a fault.
     uint8_t  panel_lamps;               // 0 = leave the lamp outputs alone
     uint16_t panel_lamp_hold_ms;        // traffic this recent keeps amber on
     uint16_t panel_lamp_dwell_ms;       // minimum time between lamp changes
     uint16_t panel_lamp_dead;           // consecutive timeouts before red
-    // Which Opta output each colour hangs off, 1-4, or 0 when that colour is
-    // not fitted. Wiring, not policy — and wiring is what gets swapped in a
-    // panel, so it is set on site rather than guessed here.
-    uint8_t  panel_lamp_out[3];         // green, amber, red
+    // What outputs 2, 3 and 4 each follow (PanelSource). Which colour sits on
+    // which output is wiring, and what a colour should mean is a site's call,
+    // so both live here rather than in the firmware's assumptions.
+    uint8_t  panel_out[3];              // outputs 2, 3, 4
 };
 
 enum class GwSource : uint8_t { STORED, DEFAULTS, CORRUPT, UNAVAILABLE, MIGRATED };

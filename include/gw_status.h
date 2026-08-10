@@ -33,6 +33,7 @@ uint16_t gwStatus_consecutiveTimeouts();
 
 // Indicators (non-blocking; call gwStatus_update() every loop)
 void gwStatus_pulseRs485();               // brief LED flash per transaction
+uint32_t gwStatus_lastRs485Ms();          // millis() of the last transaction, 0 = never
 void gwStatus_setSessionArmed(bool on);   // console session indicator
 void gwStatus_setFault(bool on);          // store/config fault or safe mode
 void gwStatus_update();

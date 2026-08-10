@@ -1,5 +1,8 @@
 #include "panel.h"
 #include "modbus_rtu.h"
+#include "gw_status.h"
+#include "gw_store.h"
+#include "net_runtime.h"
 
 // Inputs 1-5 on the Opta terminal block. Red, green, blue, yellow, white in
 // the order they are wired; what each one does is configuration.
@@ -27,6 +30,10 @@ static uint16_t _index = 0;
 static uint16_t _total = 0;
 static uint32_t _nextStepAt = 0;
 static uint32_t _resetUntil = 0;
+
+// Lamps
+static uint8_t  _lamp = LAMP_RED;      // red until the first decision
+static uint32_t _lampSince = 0;
 
 // ── Cabinet shapes ─────────────────────────────────────────────────────────
 // The number in an LGS name is the slot count. 40 and 80 are plain blocks;
@@ -99,11 +106,9 @@ static void startSweep(uint8_t action) {
     _total = (action == PANEL_RESET) ? 0 : panel_slotCount(_cabinet);
     _nextStepAt = millis();
     if (action == PANEL_RESET) {
-        // Both rails: a module that is only half powered down has not been
-        // reset. Restored by the tick once _resetUntil passes, so a reset
-        // that starts is a reset that finishes even if a button is spammed.
+        // Restored by the tick once _resetUntil passes, so a reset that
+        // starts is a reset that finishes even if the button is spammed.
         digitalWrite(MODULE_RELAY_PIN, LOW);
-        digitalWrite(LED_RELAY_PIN, LOW);
         _resetUntil = millis() + _resetMs;
     }
 }
@@ -147,7 +152,44 @@ void panel_applyConfig() {
     }
 }
 
+// Which lamp the gateway's state calls for, worst news first.
+static uint8_t lampWanted(uint32_t now) {
+    if (_resetUntil) return LAMP_RED;
+    if (gwStatus_safeMode() || !gwStore_available()) return LAMP_RED;
+    if (gwConfig_active().net_enabled && !netRuntime_isUp()) return LAMP_RED;
+    if (gwStatus_consecutiveTimeouts() >= PANEL_LAMP_DEAD_TIMEOUTS) return LAMP_RED;
+
+    if (_running != PANEL_NONE) return LAMP_AMBER;
+    const uint32_t last = gwStatus_lastRs485Ms();
+    if (last && now - last < PANEL_LAMP_ACTIVITY_MS) return LAMP_AMBER;
+
+    return LAMP_GREEN;
+}
+
+static void lampApply(uint8_t lamp) {
+    digitalWrite(PANEL_LAMP_GREEN,  lamp == LAMP_GREEN  ? HIGH : LOW);
+    digitalWrite(PANEL_LAMP_YELLOW, lamp == LAMP_AMBER  ? HIGH : LOW);
+    digitalWrite(PANEL_LAMP_RED,    lamp == LAMP_RED    ? HIGH : LOW);
+}
+
+static void lampUpdate(uint32_t now) {
+    const uint8_t want = lampWanted(now);
+    if (want == _lamp) return;
+    // Relays, not LEDs: never switch faster than the dwell.
+    if (now - _lampSince < PANEL_LAMP_DWELL_MS) return;
+    _lamp = want;
+    _lampSince = now;
+    lampApply(_lamp);
+}
+
 void panel_begin() {
+    pinMode(PANEL_LAMP_GREEN,  OUTPUT);
+    pinMode(PANEL_LAMP_YELLOW, OUTPUT);
+    pinMode(PANEL_LAMP_RED,    OUTPUT);
+    _lamp = LAMP_RED;               // until the first decision says otherwise
+    _lampSince = millis();
+    lampApply(_lamp);
+
     for (int i = 0; i < PANEL_BUTTONS; i++) {
         pinMode(PANEL_PIN[i], INPUT);
         const uint8_t level = (uint8_t)digitalRead(PANEL_PIN[i]);
@@ -166,7 +208,6 @@ void panel_update() {
     // whatever else is going on.
     if (_resetUntil && now >= _resetUntil) {
         digitalWrite(MODULE_RELAY_PIN, HIGH);
-        digitalWrite(LED_RELAY_PIN, HIGH);
         _resetUntil = 0;
         _running = PANEL_NONE;
     }
@@ -192,6 +233,18 @@ void panel_update() {
     // One slot per tick at most, so the bridges keep their share of the loop.
     if (_running != PANEL_NONE && _running != PANEL_RESET && now >= _nextStepAt) {
         stepSweep();
+    }
+
+    // The lamps report the gateway, not the buttons, so they run even when
+    // the buttons are switched off.
+    lampUpdate(now);
+}
+
+const char* panel_lampName() {
+    switch (_lamp) {
+        case LAMP_AMBER: return "amber";
+        case LAMP_RED:   return "red";
+        default:         return "green";
     }
 }
 

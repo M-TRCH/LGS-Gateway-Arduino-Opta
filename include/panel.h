@@ -34,6 +34,27 @@ enum PanelAction : uint8_t {
 
 #define PANEL_BUTTONS       5
 
+/*  Status lamps on outputs 2-4 — green, amber, red — as a traffic light, one
+ *  at a time, highest concern first:
+ *
+ *    red     the shelf is not usable: a reset is running, the gateway is in
+ *            safe mode or cannot store its settings, the LAN it was told to
+ *            use is down, or the RS485 bus has stopped answering
+ *    amber   the gateway is talking to the cabinet, or a panel sweep is running
+ *    green   ready
+ *
+ *  Amber therefore covers a server's normal polling: while somebody is using
+ *  the cabinet the panel shows amber, and green means "ready and nobody is
+ *  asking". That is what the colours were asked to mean.
+ */
+enum PanelLamp : uint8_t {
+    LAMP_GREEN = 0,
+    LAMP_AMBER = 1,
+    LAMP_RED   = 2,
+};
+
+const char* panel_lampName();
+
 void panel_begin();
 void panel_update();
 void panel_applyConfig();           // called by gw_config on load and save

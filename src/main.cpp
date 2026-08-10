@@ -45,8 +45,9 @@ static void sampleBootButton(bool& forceDefaults, bool& eraseStore) {
 void setup() {
     Serial.begin(SERIAL_BAUD);
 
+    // O1 powers the shelf; O2-O4 are the panel lamps and belong to panel.cpp,
+    // which claims them in panel_begin().
     pinMode(MODULE_RELAY_PIN, OUTPUT); digitalWrite(MODULE_RELAY_PIN, HIGH);
-    pinMode(LED_RELAY_PIN,    OUTPUT); digitalWrite(LED_RELAY_PIN,    HIGH);
     pinMode(USB_MODE_LED_PIN, OUTPUT); digitalWrite(USB_MODE_LED_PIN, LOW);
 
     // Latches the reset reason, bumps the boot-attempt counter and caches the

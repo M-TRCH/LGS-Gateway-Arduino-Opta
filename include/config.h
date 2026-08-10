@@ -8,8 +8,16 @@
 // USB console; these constants only seed the factory defaults.
 
 // ── Hardware Pins ──────────────────────────────────────────────────────────
-#define MODULE_RELAY_PIN    D0
-#define LED_RELAY_PIN       D1
+// The Opta's four relay outputs. O1 cuts the shelf's power for a reset; O2-O4
+// are the panel's status lamps, in the order they are wired at the cabinet.
+//
+// O2 used to be a second power relay for the LED rail (LED_RELAY_PIN). It is
+// the green lamp now — one output cannot be both, and a reset that dropped
+// the green lamp along with the shelf was only ever incidentally right.
+#define MODULE_RELAY_PIN    D0          // O1 — shelf power, dropped on reset
+#define PANEL_LAMP_GREEN    D1          // O2 — ready
+#define PANEL_LAMP_YELLOW   D2          // O3 — talking to the cabinet
+#define PANEL_LAMP_RED      D3          // O4 — not ready / resetting
 #define USB_MODE_LED_PIN    LED_USER    // blue front LED: ON = bridge running
 
 // Status LEDs (see gw_status.cpp for what each one means)
@@ -99,8 +107,21 @@ extern bool g_logEnabled;
 // Slot to slot. The bus itself costs ~100 ms a slot, so this is only extra
 // breathing room; 0 runs as fast as the bus allows.
 #define DEF_PANEL_STEP_MS    0
-// Both relays drop for this long on a reset press. Long enough that the
-// modules' rails actually collapse, short enough not to look like a fault.
+// The shelf's power drops for this long on a reset press. Long enough that
+// the modules' rails actually collapse, short enough not to look like a fault.
 #define DEF_PANEL_RESET_MS   1500
+
+// ── Panel status lamps ─────────────────────────────────────────────────────
+// These are mechanical relays, not LEDs on a board: a lamp that followed
+// every Modbus transaction would chatter itself to death and be unbearable
+// to stand next to. So traffic holds the amber lamp for a window rather than
+// pulsing it, and no lamp may change state faster than the dwell — under a
+// server polling steadily the amber simply stays on.
+#define PANEL_LAMP_ACTIVITY_MS  600     // traffic this recent counts as "talking"
+#define PANEL_LAMP_DWELL_MS     400     // minimum time between lamp changes
+// Consecutive RS485 timeouts before the bus is called dead. A hub channel
+// change costs one timeout and then answers, so this sits well above the
+// noise of normal operation.
+#define PANEL_LAMP_DEAD_TIMEOUTS 10
 
 #endif // CONFIG_H

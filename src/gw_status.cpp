@@ -22,6 +22,7 @@ static bool     _fault;
 static const char* _resetReason = "unknown";
 static uint8_t  _mac[6];
 static bool     _macValid;
+static uint32_t _lastRs485Ms = 0;
 static unsigned long _rs485PulseUntil;
 
 // A unicast address that is neither all-zero nor all-ones. Enough to tell a
@@ -125,7 +126,8 @@ void gwStatus_resetCounters() {
 // ── Indicators ─────────────────────────────────────────────────────────────
 void gwStatus_pulseRs485() {
     digitalWrite(LED_RS485_PIN, HIGH);
-    _rs485PulseUntil = millis() + RS485_PULSE_MS;
+    _lastRs485Ms = millis();
+    _rs485PulseUntil = _lastRs485Ms + RS485_PULSE_MS;
 }
 
 void gwStatus_setSessionArmed(bool on) { digitalWrite(LED_SESSION_PIN, on ? HIGH : LOW); }
@@ -157,6 +159,7 @@ void gwStatus_markHealthy() {
 
 const char* gwStatus_resetReason() { return _resetReason; }
 uint32_t    gwStatus_uptimeS()     { return (millis() - _bootMs) / 1000UL; }
+uint32_t    gwStatus_lastRs485Ms() { return _lastRs485Ms; }
 
 // ── Identity ───────────────────────────────────────────────────────────────
 const uint8_t* gwStatus_mac()  { return _mac; }

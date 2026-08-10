@@ -117,8 +117,27 @@ static void doInfo() {
     emitf("#OK INFO n=10");
 }
 
+// Drive one lamp so the panel's wiring can be checked at the cabinet. Not
+// gated on HELLO: it changes nothing that outlives the timeout, and needing a
+// session to test a lamp is friction with no safety in it.
+static void doLamp(char** argv, int argc) {
+    if (argc < 1) { emit("#ERR LAMP err=syntax want=green|amber|red|off"); return; }
+    uint8_t lamp;
+    if      (!strcasecmp(argv[0], "green")) lamp = LAMP_GREEN;
+    else if (!strcasecmp(argv[0], "amber") ||
+             !strcasecmp(argv[0], "yellow")) lamp = LAMP_AMBER;
+    else if (!strcasecmp(argv[0], "red"))   lamp = LAMP_RED;
+    else if (!strcasecmp(argv[0], "off"))   lamp = PANEL_LAMP_OFF;
+    else { emit("#ERR LAMP err=range want=green|amber|red|off"); return; }
+    uint32_t ms = (argc >= 2) ? (uint32_t)strtoul(argv[1], nullptr, 10) : 5000UL;
+    if (ms < 200UL)   ms = 200UL;
+    if (ms > 60000UL) ms = 60000UL;
+    panel_forceLamp(lamp, ms);
+    emitf("#OK LAMP %s ms=%lu", argv[0], (unsigned long)ms);
+}
+
 static void doHelp() {
-    emit("#DATA verbs=PING,INFO,HELP,GET,HELLO,BYE,SET,SAVE,DISCARD,DEFAULTS,REBOOT");
+    emit("#DATA verbs=PING,INFO,HELP,GET,HELLO,BYE,SET,SAVE,DISCARD,DEFAULTS,REBOOT,LAMP");
     emit("#DATA note=SET/SAVE/DISCARD/DEFAULTS/REBOOT need HELLO first");
     for (int i = 0; i < gwConfig_keyCount(); i++) {
         emitf("#DATA key=%s%s%s", gwConfig_keyName(i),
@@ -219,6 +238,7 @@ static void dispatch(char* body) {
     if      (strcasecmp(verb, "PING") == 0) doPing();
     else if (strcasecmp(verb, "INFO") == 0) doInfo();
     else if (strcasecmp(verb, "HELP") == 0) doHelp();
+    else if (strcasecmp(verb, "LAMP") == 0) doLamp(rest, restN);
     else if (strcasecmp(verb, "GET")  == 0) {
         if (restN == 0) { doGetAll(); return; }
         int idx = gwConfig_indexOf(rest[0]);

@@ -68,6 +68,10 @@ struct GwConfig {
     uint16_t panel_lamp_hold_ms;        // traffic this recent keeps amber on
     uint16_t panel_lamp_dwell_ms;       // minimum time between lamp changes
     uint16_t panel_lamp_dead;           // consecutive timeouts before red
+    // Which Opta output each colour hangs off, 1-4, or 0 when that colour is
+    // not fitted. Wiring, not policy — and wiring is what gets swapped in a
+    // panel, so it is set on site rather than guessed here.
+    uint8_t  panel_lamp_out[3];         // green, amber, red
 };
 
 enum class GwSource : uint8_t { STORED, DEFAULTS, CORRUPT, UNAVAILABLE, MIGRATED };

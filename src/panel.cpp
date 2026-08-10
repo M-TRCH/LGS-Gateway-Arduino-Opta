@@ -38,6 +38,24 @@ static uint8_t  _lampsOn = 1;
 static uint16_t _lampHoldMs = DEF_PANEL_LAMP_HOLD_MS;
 static uint16_t _lampDwellMs = DEF_PANEL_LAMP_DWELL_MS;
 static uint16_t _lampDead = DEF_PANEL_LAMP_DEAD;
+// Which Opta output each colour hangs off (green, amber, red), 0 = not fitted.
+static uint8_t  _lampOut[3] = { DEF_PANEL_LAMP_OUT_GREEN,
+                                DEF_PANEL_LAMP_OUT_AMBER,
+                                DEF_PANEL_LAMP_OUT_RED };
+static void lampApply(uint8_t lamp);    // defined with the rest of the lamp code
+static uint8_t  _forceLamp = 0xFF;      // 0xFF = follow the gateway's state
+static uint32_t _forceUntil = 0;
+
+// Output number as wired on the terminal block -> the pin that drives it.
+// O1 is the shelf's power and is never a lamp; gw_config refuses it.
+static int lampPin(uint8_t out) {
+    switch (out) {
+        case 2:  return PANEL_OUT_2;
+        case 3:  return PANEL_OUT_3;
+        case 4:  return PANEL_OUT_4;
+        default: return -1;
+    }
+}
 
 // ── Cabinet shapes ─────────────────────────────────────────────────────────
 // The number in an LGS name is the slot count. 40 and 80 are plain blocks;
@@ -155,11 +173,15 @@ void panel_applyConfig() {
     _lampDwellMs = c.panel_lamp_dwell_ms;
     _lampDead = c.panel_lamp_dead;
     if (_lampsOn && !c.panel_lamps) {   // switched off: leave nothing lit
-        digitalWrite(PANEL_LAMP_GREEN, LOW);
-        digitalWrite(PANEL_LAMP_YELLOW, LOW);
-        digitalWrite(PANEL_LAMP_RED, LOW);
+        lampApply(0xFF);                // no colour matches: all three out
     }
     _lampsOn = c.panel_lamps;
+    for (uint8_t i = 0; i < 3; i++) {
+        _lampOut[i] = c.panel_lamp_out[i];
+        const int pin = lampPin(_lampOut[i]);
+        if (pin >= 0) pinMode(pin, OUTPUT);
+    }
+    if (_lampsOn) lampApply(_lamp);     // a remapped colour lights straight away
     for (int i = 0; i < PANEL_BUTTONS; i++) {
         _action[i] = c.panel_btn[i] > PANEL_ACTION_MAX ? PANEL_NONE : c.panel_btn[i];
     }
@@ -180,12 +202,19 @@ static uint8_t lampWanted(uint32_t now) {
 }
 
 static void lampApply(uint8_t lamp) {
-    digitalWrite(PANEL_LAMP_GREEN,  lamp == LAMP_GREEN  ? HIGH : LOW);
-    digitalWrite(PANEL_LAMP_YELLOW, lamp == LAMP_AMBER  ? HIGH : LOW);
-    digitalWrite(PANEL_LAMP_RED,    lamp == LAMP_RED    ? HIGH : LOW);
+    for (uint8_t i = 0; i < 3; i++) {
+        const int pin = lampPin(_lampOut[i]);
+        if (pin < 0) continue;              // colour not fitted
+        digitalWrite(pin, (i == lamp) ? HIGH : LOW);
+    }
 }
 
 static void lampUpdate(uint32_t now) {
+    if (_forceLamp != 0xFF) {           // a wiring check is in progress
+        if ((int32_t)(now - _forceUntil) < 0) return;
+        _forceLamp = 0xFF;              // expired: fall back to the real state
+        _lampSince = 0;                 // and let it show immediately
+    }
     if (!_lampsOn) return;              // outputs left exactly as they are
     const uint8_t want = lampWanted(now);
     if (want == _lamp) return;
@@ -197,9 +226,10 @@ static void lampUpdate(uint32_t now) {
 }
 
 void panel_begin() {
-    pinMode(PANEL_LAMP_GREEN,  OUTPUT);
-    pinMode(PANEL_LAMP_YELLOW, OUTPUT);
-    pinMode(PANEL_LAMP_RED,    OUTPUT);
+    for (uint8_t i = 0; i < 3; i++) {
+        const int pin = lampPin(_lampOut[i]);
+        if (pin >= 0) pinMode(pin, OUTPUT);
+    }
     _lamp = LAMP_RED;               // until the first decision says otherwise
     _lampSince = millis();
     lampApply(_lamp);
@@ -254,7 +284,21 @@ void panel_update() {
     lampUpdate(now);
 }
 
+void panel_forceLamp(uint8_t lamp, uint32_t ms) {
+    _forceLamp = lamp;
+    _forceUntil = millis() + ms;
+    lampApply(lamp == PANEL_LAMP_OFF ? 0xFF : lamp);
+}
+
 const char* panel_lampName() {
+    if (_forceLamp == PANEL_LAMP_OFF) return "forced-off";
+    if (_forceLamp != 0xFF) {
+        switch (_forceLamp) {
+            case LAMP_AMBER: return "forced-amber";
+            case LAMP_RED:   return "forced-red";
+            default:         return "forced-green";
+        }
+    }
     if (!_lampsOn) return "off";
     switch (_lamp) {
         case LAMP_AMBER: return "amber";

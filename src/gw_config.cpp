@@ -55,6 +55,9 @@ static const KeyDef KEYS[] = {
     { "panel.lamp_hold_ms",   KIND_U16,  100, 5000,     false },
     { "panel.lamp_dwell_ms",  KIND_U16,  100, 2000,     false },
     { "panel.lamp_dead",      KIND_U16,  1, 100,        false },
+    { "panel.lamp_green",     KIND_U16,  0, 4,          false },
+    { "panel.lamp_amber",     KIND_U16,  0, 4,          false },
+    { "panel.lamp_red",       KIND_U16,  0, 4,          false },
 };
 static const int KEY_N = (int)(sizeof(KEYS) / sizeof(KEYS[0]));
 
@@ -106,6 +109,9 @@ static void defaults(GwConfig& c) {
     c.panel_lamp_hold_ms   = DEF_PANEL_LAMP_HOLD_MS;
     c.panel_lamp_dwell_ms  = DEF_PANEL_LAMP_DWELL_MS;
     c.panel_lamp_dead      = DEF_PANEL_LAMP_DEAD;
+    c.panel_lamp_out[0]    = DEF_PANEL_LAMP_OUT_GREEN;
+    c.panel_lamp_out[1]    = DEF_PANEL_LAMP_OUT_AMBER;
+    c.panel_lamp_out[2]    = DEF_PANEL_LAMP_OUT_RED;
 }
 
 static bool parseIp(const char* s, uint32_t* out) {
@@ -166,6 +172,9 @@ static uint32_t valueOf(const GwConfig& c, int i) {
         case 32: return c.panel_lamp_hold_ms;
         case 33: return c.panel_lamp_dwell_ms;
         case 34: return c.panel_lamp_dead;
+        case 35: return c.panel_lamp_out[0];
+        case 36: return c.panel_lamp_out[1];
+        case 37: return c.panel_lamp_out[2];
         default: return 0;
     }
 }
@@ -204,6 +213,9 @@ static void storeValue(GwConfig& c, int i, uint32_t v) {
         case 32: c.panel_lamp_hold_ms  = (uint16_t)v; break;
         case 33: c.panel_lamp_dwell_ms = (uint16_t)v; break;
         case 34: c.panel_lamp_dead     = (uint16_t)v; break;
+        case 35: c.panel_lamp_out[0]   = (uint8_t)v; break;
+        case 36: c.panel_lamp_out[1]   = (uint8_t)v; break;
+        case 37: c.panel_lamp_out[2]   = (uint8_t)v; break;
         default: break;
     }
 }
@@ -443,6 +455,24 @@ int gwConfig_validateStaged(char* detail, size_t n) {
         _staged.panel_cabinet != 80) {
         snprintf(detail, n, "panel.cabinet=40|64|80");
         return -1;
+    }
+    // Output 1 cuts the shelf's power. A lamp there would go dark every time
+    // somebody pressed reset, and the reset would flash the lamp — refuse it
+    // rather than let a panel be wired into a puzzle.
+    static const char* LAMPNAME[3] = { "green", "amber", "red" };
+    for (int i = 0; i < 3; i++) {
+        if (_staged.panel_lamp_out[i] == 1) {
+            snprintf(detail, n, "panel.lamp_%s=2|3|4_or_0", LAMPNAME[i]);
+            return -1;
+        }
+        for (int j = i + 1; j < 3; j++) {
+            if (_staged.panel_lamp_out[i] && 
+                _staged.panel_lamp_out[i] == _staged.panel_lamp_out[j]) {
+                snprintf(detail, n, "panel.lamp_%s_and_%s_share_output",
+                         LAMPNAME[i], LAMPNAME[j]);
+                return -1;
+            }
+        }
     }
     const GwConfig& c = _staged;
 

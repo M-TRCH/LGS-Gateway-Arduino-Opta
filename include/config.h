@@ -11,13 +11,16 @@
 // The Opta's four relay outputs. O1 cuts the shelf's power for a reset; O2-O4
 // are the panel's status lamps, in the order they are wired at the cabinet.
 //
-// O2 used to be a second power relay for the LED rail (LED_RELAY_PIN). It is
-// the green lamp now — one output cannot be both, and a reset that dropped
-// the green lamp along with the shelf was only ever incidentally right.
+// O2 used to be a second power relay for the LED rail (LED_RELAY_PIN). It
+// carries a lamp now — one output cannot be both, and a reset that dropped a
+// lamp along with the shelf was only ever incidentally right.
 #define MODULE_RELAY_PIN    D0          // O1 — shelf power, dropped on reset
-#define PANEL_LAMP_GREEN    D1          // O2 — ready
-#define PANEL_LAMP_YELLOW   D2          // O3 — talking to the cabinet
-#define PANEL_LAMP_RED      D3          // O4 — not ready / resetting
+// O2-O4 carry the panel lamps. Which colour is on which is wiring, and
+// wiring is what gets swapped in a panel, so it is set at panel.lamp_green
+// / _amber / _red rather than fixed here.
+#define PANEL_OUT_2         D1
+#define PANEL_OUT_3         D2
+#define PANEL_OUT_4         D3
 #define USB_MODE_LED_PIN    LED_USER    // blue front LED: ON = bridge running
 
 // Status LEDs (see gw_status.cpp for what each one means)
@@ -124,5 +127,10 @@ extern bool g_logEnabled;
 // change costs one timeout and then answers, so this sits well above the
 // noise of normal operation.
 #define DEF_PANEL_LAMP_DEAD      10
+// Which output each colour is wired to, as the panel was built. Output 1 is
+// the shelf's power relay and is never a lamp; 0 = that colour is not fitted.
+#define DEF_PANEL_LAMP_OUT_GREEN 2
+#define DEF_PANEL_LAMP_OUT_AMBER 3
+#define DEF_PANEL_LAMP_OUT_RED   4
 
 #endif // CONFIG_H

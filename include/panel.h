@@ -55,6 +55,14 @@ enum PanelLamp : uint8_t {
 
 const char* panel_lampName();
 
+/*  Force a lamp on for `ms`, ignoring what the gateway's state would ask for.
+ *  This is how the panel's wiring is checked at the cabinet: drive each
+ *  colour in turn and watch. `lamp` is a PanelLamp, or PANEL_LAMP_OFF for
+ *  all three out. Expires on its own, so a console session that walks away
+ *  cannot leave the panel lying. */
+#define PANEL_LAMP_OFF  0xFE
+void panel_forceLamp(uint8_t lamp, uint32_t ms);
+
 void panel_begin();
 void panel_update();
 void panel_applyConfig();           // called by gw_config on load and save

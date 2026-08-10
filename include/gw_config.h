@@ -68,10 +68,11 @@ struct GwConfig {
     uint16_t panel_lamp_hold_ms;        // traffic this recent keeps amber on
     uint16_t panel_lamp_dwell_ms;       // minimum time between lamp changes
     uint16_t panel_lamp_dead;           // consecutive timeouts before red
-    // What outputs 2, 3 and 4 each follow (PanelSource). Which colour sits on
-    // which output is wiring, and what a colour should mean is a site's call,
-    // so both live here rather than in the firmware's assumptions.
-    uint8_t  panel_out[3];              // outputs 2, 3, 4
+    // What each relay output does (PanelSource), outputs 1-4. Which colour
+    // sits on which output is wiring, what a colour should mean is a site's
+    // call, and even which relay carries the shelf's power is a wiring
+    // decision — so all of it lives here rather than in the firmware.
+    uint8_t  panel_out[4];              // outputs 1, 2, 3, 4
     // Scheduled power cycle of the shelf. The clock itself is not stored —
     // the Opta cannot keep it through a power cut, so it is set at runtime
     // and the schedule simply does nothing until it has been.

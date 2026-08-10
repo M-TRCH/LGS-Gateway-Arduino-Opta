@@ -14,7 +14,7 @@
 // O2 used to be a second power relay for the LED rail (LED_RELAY_PIN). It
 // carries a lamp now — one output cannot be both, and a reset that dropped a
 // lamp along with the shelf was only ever incidentally right.
-#define MODULE_RELAY_PIN    D0          // O1 — shelf power, dropped on reset
+#define PANEL_OUT_1         D0          // O1 — the shelf's power by default
 // O2-O4 carry the panel lamps. Which colour is on which is wiring, and
 // wiring is what gets swapped in a panel, so it is set at panel.lamp_green
 // / _amber / _red rather than fixed here.
@@ -127,10 +127,12 @@ extern bool g_logEnabled;
 // change costs one timeout and then answers, so this sits well above the
 // noise of normal operation.
 #define DEF_PANEL_LAMP_DEAD      10
-// What each output follows, as the panel was first described: green on O2 is
-// "ready", amber on O3 is "busy", red on O4 is "not usable". Mapping the
-// three state sources to three outputs is what makes it a traffic light; see
-// PanelSource in panel.h for what else an output can follow.
+// What each relay output does, as the cabinet was first built: O1 carries the
+// shelf's power (which is what a reset drops), and O2-O4 are the traffic
+// light. All four are mapped the same way, so moving the shelf's power to
+// another relay is a setting rather than a firmware change. See PanelSource
+// in panel.h for the full list.
+#define DEF_PANEL_OUT1       8      // SRC_SHELF
 #define DEF_PANEL_OUT2       1      // SRC_READY
 #define DEF_PANEL_OUT3       2      // SRC_BUSY
 #define DEF_PANEL_OUT4       3      // SRC_FAULT

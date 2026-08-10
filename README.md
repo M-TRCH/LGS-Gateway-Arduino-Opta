@@ -2,7 +2,9 @@
 
 Transparent **Modbus TCP → Modbus RTU gateway** running on an [Arduino Opta](https://docs.arduino.cc/hardware/opta/). It accepts Modbus TCP requests on port 502, re-frames them as Modbus RTU (strips the MBAP header, appends CRC-16), forwards them over the RS485 bus, and returns the slave's reply to the TCP client with the original transaction ID.
 
-Acts as the network bridge for the LGS module grid, where slaves are addressed by cabinet position.
+It is also the cabinet's own control panel: five buttons and four relay outputs on the Opta's terminals let an LGS cabinet be exercised, watched and power-cycled at the cabinet, with no PC and no network.
+
+Everything below is **runtime configuration** held in the Opta's own flash and edited over the `$LGS` text console on the USB port — usually from the [LGS Test Tool](https://github.com/M-TRCH/LGS-Test-Tool)'s Gateway tab. One firmware build serves every site.
 
 ## Hardware
 
@@ -10,65 +12,106 @@ Acts as the network bridge for the LGS module grid, where slaves are addressed b
 |---|---|
 | Board | Arduino Opta (STM32H747, mbed core) |
 | RS485 | Built-in half-duplex port (A/B terminals) → Modbus RTU bus @ 9600 baud |
-| Ethernet | Built-in RJ45, static IP |
-| Relay outputs | `D0` = module power relay, `D1` = LED power relay (both driven HIGH at boot) |
-| Buttons (inputs) | `A0` Red, `A1` Green, `A2` Blue, `A3` Yellow, `A4` White (Opta terminals I1–I5) |
+| Ethernet | Built-in RJ45, static IP by default |
+| Relay outputs | `D0`–`D3` = Opta outputs 1–4. What each one does is mapped at `panel.out1`–`out4`; by default O1 carries the shelf's power and O2–O4 are status lamps |
+| Buttons (inputs) | `A0`–`A4` = Opta inputs 1–5. What each one does is mapped at `panel.btn1`–`btn5`; the cabinet's are wired red, green, blue, yellow, white in that order |
+| Clock | On-board RTC with **no battery** — the time is lost on every power cut and must be set again (the Test Tool does it automatically) |
+
+## Front panel
+
+### Buttons (inputs 1–5)
+
+Each button runs its action across the whole cabinet, one slot at a time from `loop()` so the bridges and the watchdog keep running. Pressing another button replaces whatever is running.
+
+| Action (`panel.btnN`) | What it does |
+|---|---|
+| `0` none | Button ignored |
+| `1` all_on | Ring + slot number on every slot, slot by slot, left on |
+| `2` all_off | Everything out |
+| `3` all_unlock | Ring + number + latch on every slot |
+| `4` reset | Drops the shelf's power for `panel.reset_ms` — a power cycle |
+
+Defaults follow the cabinet as built: red = all_on, green = all_off, blue = all_unlock, white = reset, yellow unassigned. `panel.enabled` is **off** by default, so a bench unit with nothing wired to its inputs cannot sweep somebody's cabinet.
+
+### Relay outputs (1–4)
+
+Each output follows one source. Ready, busy and fault are three faces of one state, so mapping those to three outputs gives a traffic light — exactly one lit, worst news first.
+
+| Source (`panel.outN`) | Output is energised when |
+|---|---|
+| `0` none | never |
+| `1` ready | no fault, and nothing is talking to the cabinet |
+| `2` busy | RS485 traffic within `panel.lamp_hold_ms`, or a sweep is running |
+| `3` fault | resetting, safe mode, store unavailable, LAN configured but down, or the bus has stopped answering (`panel.lamp_dead` consecutive timeouts) |
+| `4` link | the LAN is up |
+| `5` client | a Modbus TCP client is connected |
+| `6` sweep | a panel sweep is running |
+| `7` reset | the shelf's power is dropped right now |
+| `8` shelf | **the shelf's power** — energised except while a reset runs |
+
+These are mechanical relays, not LEDs. Traffic *holds* a lamp for a window rather than flashing it, and no lamp changes state faster than `panel.lamp_dwell_ms`; under a server polling steadily the busy lamp simply stays on. An output mapped to `shelf` is exempt from all of that — it is not rate-limited, it is not switched off with the lamps, and a lamp test never touches it, because cutting the cabinet to check a bulb would be a poor trade.
+
+`$LGS LAMP 1|2|3|4|off [ms]` drives one output directly so the panel's wiring can be checked without waiting for the gateway to feel like being green. It expires on its own.
+
+## Clock and scheduled reset
+
+The Opta's RTC has no battery, so the time is lost on every power cut — the very event a scheduled reset exists to recover from. Therefore:
+
+- the clock is **unset** until somebody sets it, and `time.set` says which;
+- **nothing is ever scheduled while it is unset**, because a gateway that booted believing it was January 1970 would fire the moment its target came round in that fiction;
+- the Test Tool sets it whenever it reads a gateway whose clock is unset, so in practice it is right within seconds of a power-up.
+
+The clock keeps **wall time, not UTC**. There is no timezone anywhere in this firmware: a schedule that says 03:00 means the 03:00 the pharmacist would recognise, and a tool setting it must send local seconds.
+
+```
+$LGS TIME              read the clock
+$LGS TIME 1786380152   set it (seconds since 1970, LOCAL)
+```
+
+`sched.reset_enabled` / `sched.reset_hhmm` (300 = 03:00) / `sched.reset_days` (bit0 = Sunday, 0 = every day) fire the same path the reset button takes. `sched.last` in `INFO` answers "did it actually run?", which matters for something that is over in a second and a half at three in the morning.
+
+## RS485 switch hub
+
+A cabinet may route RS485 through a channel-switching hub. Measured on a live LGS-64: the first frame on a new channel triggers the switch, that frame is always swallowed, and the channel stays deaf for about **two seconds** — longer than any master's timeout, so no amount of retrying inside one transaction can save it.
+
+The gateway therefore repairs by **clock, not burst**: it spends the trigger frame, remembers when the channel opens (`bus.hub_settle_ms`), and holds any earlier request in silence until that deadline before sending it. `bus.hub_map` says which row hangs off which channel — wiring, not arithmetic — and an all-zero map disables the whole thing, which is what a gateway wired straight to the bus wants.
+
+What a master must do for a full sweep to succeed:
+
+| Master behaviour | Result on a 64-slot cabinet |
+|---|---|
+| retries ≥ 1, timeout 1.5 s | **64/64** — the retry lands in the hold |
+| no retries, timeout 1.5 s | 55/64 — only the trigger frame per channel change is lost |
+| no retries, timeout ≥ 2.6 s, `bus.hub_budget_ms` ≈ 3000 | **64/64** — repaired in-line |
+
+`bus.hub_budget_ms` must stay under the master's timeout: overrunning it desynchronises the bridge, which is worse than the frame the repair set out to save.
 
 ## Network defaults
 
-| Setting | Value | Where to change |
+| Setting | Default | Key |
 |---|---|---|
-| Static IP | `192.168.0.178` | `include/config.h` (`NET_STATIC_IP`) |
-| MAC address | `DE:AD:BE:EF:FE:ED` | `include/config.h` (`NET_MAC_ADDRESS`) |
-| Modbus TCP port | `502` | `include/config.h` (`MODBUS_TCP_PORT`) |
+| Ethernet | **off** | `net.enabled` |
+| Static IP | `192.168.0.178` | `net.ip` |
+| Modbus TCP port | `502` | `net.port` |
+| MAC address | read from the STM32's OTP | *(read-only, `net.mac`)* |
 
-The server accepts **one TCP client at a time**; additional connections are refused until the active client disconnects.
+Ethernet is off out of the box: a gateway shipped for bench use talks over USB only, and a unit that has never been configured should not put an address on someone's LAN. The server accepts **one TCP client at a time** — a second connection is silently closed, which looks exactly like a dead gateway if you do not know it.
 
-## Front-panel buttons
+## Console
 
-> **Temporarily disabled** — `PANEL_BUTTONS_ENABLED` is `0` in `include/config.h`, so all buttons below are ignored and the operating mode is fixed at build time by `USB_BRIDGE_ON_BOOT` (`0` = TCP gateway, `1` = USB-RS485 bridge). Set `PANEL_BUTTONS_ENABLED` back to `1` to restore button control.
+Text lines on the USB port, `$LGS ` prefixed, so the same cable carries Modbus and configuration without a mode switch.
 
-| Button | Action (when buttons are enabled) |
-|---|---|
-| White (`A4`) | Hardware reset — relays off, 3 s settle, MCU reset (works in both modes) |
-| Red (`A0`) | Coil sweep self-test (~10 s; longer if slaves don't respond) |
-| Blue (`A2`) | Extended coil test (~72 s) |
-| Green (`A1`) | Toggle **USB-RS485 bridge mode** (blue USER LED on = active) |
-| Yellow (`A3`) | Not assigned yet |
+```
+$LGS PING | INFO | HELP | GET [key] | LAMP <1-4|off> [ms] | TIME [epoch]
+$LGS HELLO            arm a 120 s session (required by the write verbs)
+$LGS SET key=value …  stage changes
+$LGS SAVE             validate, persist, apply live
+$LGS DISCARD | DEFAULTS | REBOOT | BYE
+```
 
-Self-tests iterate the module grid rows 1–6 × columns 1–4 with slave ID = `row*10 + col` (e.g. row 2, column 3 → slave 23), writing coil 1004 (sweep) / 1024 (extended). A coil sweep also runs automatically ~2 s after boot. **While a self-test runs, the TCP bridge is not serviced** — clients see no responses until it finishes.
+Write verbs need an armed session so a false positive from binary Modbus traffic can never mutate anything. `SAVE` reports which groups took effect (`applied=bus,panel`) and which keys need a reboot.
 
-## USB-RS485 bridge mode (Green button)
-
-Turns the Opta into a plain **USB→RS485 Modbus RTU converter**: a PC Modbus master (Modbus Poll, QModMaster, `mbpoll`, pymodbus, …) talks straight to the RS485 modules through the Opta's USB COM port.
-
-Usage:
-
-1. Connect the Opta to the PC via USB-C (the same port used for flashing).
-2. Enter the mode: while buttons are disabled, set `USB_BRIDGE_ON_BOOT` to `1` in `include/config.h` and rebuild + reflash (with buttons enabled, press **Green** instead). The blue USER LED turns on and the COM port becomes a pure binary RTU pipe (all serial logging is suspended; the startup coil sweep is skipped).
-3. In the PC tool select the Opta COM port, mode **RTU**, any baud/parity (USB CDC ignores them — the RS485 side always runs at `RS485_BAUD`), and poll the slaves directly.
-4. Return to TCP-gateway mode by setting `USB_BRIDGE_ON_BOOT` back to `0` (or, with buttons enabled, pressing **Green** again — in that case the device always boots in TCP-gateway mode).
-
-Behavior while the mode is active:
-
-- The TCP gateway is suspended: the active client is dropped and new connections are closed immediately. In build-time USB-bridge builds (`USB_BRIDGE_ON_BOOT 1`) TCP/Ethernet is **fully disabled** — `Ethernet.begin()` on the mbed core blocks forever when no LAN cable is attached, so USB-bridge builds must never touch it.
-- Requests are forwarded per transaction: a frame ends after 10 ms of serial silence, is CRC-checked (invalid frames are dropped — the master's own retry handles it), sent over RS485, and the reply is returned verbatim. Broadcasts (address 0) produce no reply, as normal.
-- Red/Blue self-tests are disabled; White (hardware reset) still works.
-
-## Key configuration (`include/config.h`)
-
-| Define | Default | Meaning |
-|---|---|---|
-| `PANEL_BUTTONS_ENABLED` | 0 | External buttons ignored while 0 (temporary) |
-| `USB_BRIDGE_ON_BOOT` | 0 | Boot mode while buttons are disabled: 0 = TCP gateway, 1 = USB bridge |
-| `SERIAL_LOG_ENABLED` | 0 | All log output on the USB port compiled out while 0 (temporary) |
-| `RS485_BAUD` | 9600 | RTU bus baud rate |
-| `TIMEOUT_FIRST_BYTE_MS` | 300 | Wait for first byte of the slave reply |
-| `TIMEOUT_INTER_BYTE_MS` | 20 | RTU inter-byte frame gap |
-| `TIMEOUT_TCP_PAYLOAD_MS` | 100 | Wait for fragmented TCP payload |
-| `USB_FRAME_GAP_MS` | 10 | Silence that ends one RTU frame from the USB host |
-| `RTU_BUF_SIZE` / `TCP_BUF_SIZE` | 256 | Frame buffers |
-| `SELFTEST_ROWS` / `SELFTEST_COLS` | 6 / 4 | Module grid size for self-tests |
+Stored settings carry a **schema number**, checked on load. Bump `GW_BLOB_SCHEMA` in `src/gw_store.cpp` whenever a field's *meaning* changes without the struct changing size — otherwise the old bytes are read back as the new field and quietly mean something else.
 
 ## Build / upload / monitor
 
@@ -77,36 +120,26 @@ PlatformIO project (VS Code + PlatformIO IDE extension recommended — see `.vsc
 ```
 pio run                # build
 pio run -t upload      # flash over USB
-pio device monitor     # serial log @ 115200 baud
+pio device monitor     # serial log @ 115200 baud (sys.log must be on)
 ```
 
-Equivalent VS Code tasks **Build / Upload / Monitor** are predefined in `.vscode/tasks.json`.
+The Test Tool's Gateway tab can also flash a `.bin` over DFU, and prepare a factory-fresh Opta whose QSPI has no partition table.
 
 ## Project structure
 
 ```
-include/config.h                            All tunables: pins, network identity, baud rates, timeouts, self-test grid
-include/modbus_rtu.h + src/modbus_rtu.cpp   RTU transport: CRC-16, transaction with echo-strip, FC05 writeCoil
-include/tcp_bridge.h + src/tcp_bridge.cpp   Modbus TCP server (port 502) and TCP↔RTU re-framing
-include/self_test.h  + src/self_test.cpp    Coil sweep + extended coil test routines
-include/usb_bridge.h + src/usb_bridge.cpp   USB→RS485 Modbus RTU passthrough (Green-button mode)
-src/main.cpp                                Setup, button dispatch, mode switching, hardware reset
-```
-
-## Publishing to GitHub (when ready)
-
-The repo is local-only for now. To publish under the M-TRCH account:
-
-```powershell
-gh auth login   # first time only
-gh repo create M-TRCH/LGS-Gateway-Arduino-Opta --private --source=. --remote=origin --push
-```
-
-Use `--public` instead of `--private` if preferred. Manual alternative:
-
-```powershell
-git remote add origin https://github.com/M-TRCH/LGS-Gateway-Arduino-Opta.git
-git push -u origin main
+include/config.h      Compile-time DEFAULTS only — everything a site changes lives in GwConfig
+include/gw_config.h   The settings struct, the key table's contract
+src/gw_config.cpp     Key table, parse/format, validation, apply-live
+src/gw_store.cpp      Persistence in the QSPI KVStore: magic, schema, size, CRC
+src/gw_console.cpp    The $LGS line protocol
+src/modbus_rtu.cpp    RTU transport, echo strip, and the RS485 hub settle clock
+src/tcp_bridge.cpp    Modbus TCP server and TCP↔RTU re-framing
+src/usb_bridge.cpp    USB→RS485 passthrough
+src/panel.cpp         Buttons, cabinet sweeps, relay outputs and lamps
+src/sched.cpp         Wall clock and the scheduled shelf reset
+src/gw_status.cpp     Counters, status LEDs, reset reason, OTP MAC
+src/main.cpp          Setup ordering and the loop
 ```
 
 ## Provenance
@@ -117,6 +150,8 @@ Cloned from [`M-TRCH/LGS-Master`](https://github.com/M-TRCH/LGS-Master) branch `
 
 ## สรุปภาษาไทย
 
-เฟิร์มแวร์ **Gateway แปลง Modbus TCP ↔ Modbus RTU** บน Arduino Opta — รับคำสั่ง Modbus TCP ทาง Ethernet (port 502, รับทีละ 1 client) แล้วส่งต่อไปยังโมดูลบนบัส RS485 (9600 baud) โดยแปลง frame ให้อัตโนมัติ ปุ่มหน้าเครื่อง: ขาว = รีเซ็ตฮาร์ดแวร์, แดง = ทดสอบ coil sweep, น้ำเงิน = ทดสอบแบบยาว (ระหว่างทดสอบ bridge จะหยุดรับ TCP ชั่วคราว), เขียว = สลับโหมด **USB-RS485 bridge** ให้คอมพิวเตอร์ส่ง Modbus RTU ตรงผ่าน COM port ไปยังโมดูลบน RS485 ได้เลย (ไฟ USER สีน้ำเงินติด = อยู่ในโหมดนี้ และ TCP gateway จะพักชั่วคราว)
+เฟิร์มแวร์ **Gateway แปลง Modbus TCP ↔ Modbus RTU** บน Arduino Opta — รับคำสั่ง Modbus TCP ทาง Ethernet (port 502, รับทีละ 1 client) แล้วส่งต่อไปยังโมดูลบนบัส RS485 และเป็นแผงควบคุมหน้าตู้ด้วย: ปุ่ม 5 ปุ่มกับรีเลย์ 4 ตัวบนขั้วของ Opta ทำให้ทดสอบ ดูสถานะ และตัดไฟตู้ได้ที่หน้าตู้เลย ไม่ต้องมีคอมพิวเตอร์และไม่ต้องมีเครือข่าย
 
-**หมายเหตุ:** ตอนนี้ปุ่มภายนอกถูกปิดใช้งานชั่วคราว (`PANEL_BUTTONS_ENABLED = 0` ใน `include/config.h`) — เลือกโหมดด้วย `USB_BRIDGE_ON_BOOT` (0 = TCP gateway, 1 = USB-RS485 bridge) แล้ว build + upload ใหม่ และ log ทางช่อง USB ถูกปิดชั่วคราวเช่นกัน (`SERIAL_LOG_ENABLED = 0`) เพื่อให้ COM port เป็นทางเดินข้อมูล RTU ล้วนๆ หลังบูต ~2 วินาทีจะรัน coil sweep อัตโนมัติหนึ่งรอบ build/upload ด้วย PlatformIO
+**ทุกอย่างตั้งค่าตอนใช้งานได้** ผ่านคำสั่งข้อความ `$LGS` บนสาย USB (ปกติสั่งจากแท็บ Gateway ของ LGS Test Tool) เฟิร์มแวร์ตัวเดียวจึงใช้ได้ทุกหน้างาน — ปุ่มไหนทำอะไร รีเลย์ไหนเป็นไฟสีอะไรหรือเป็นไฟเลี้ยงชั้นวาง ผังสาย RS485 hub ไปจนถึงเวลารีเซตอัตโนมัติ ล้วนเป็นค่าตั้งทั้งหมด
+
+ข้อควรรู้สองเรื่อง: **hub สลับช่องต้องเงียบราว 2 วินาที** เกตเวย์จึงหน่วงคำขอไว้เงียบๆ จนช่องพร้อมแทนการยิงซ้ำรัว (ฝั่งเซิร์ฟเวอร์ต้องตั้ง retry ≥ 1 หรือ timeout ≥ 2.6 วิ) และ **นาฬิกาของ Opta ไม่มีแบตเตอรี่** เวลาหายทุกครั้งที่ไฟดับ ระบบจึงไม่ยิงตารางใดๆ จนกว่าจะมีคนตั้งเวลา (Test Tool ตั้งให้เองอัตโนมัติ) และนาฬิกาเก็บเวลาท้องถิ่น ไม่ใช่ UTC

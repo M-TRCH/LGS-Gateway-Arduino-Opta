@@ -35,8 +35,8 @@ static uint32_t _resetUntil = 0;
 // Lamps. Each of outputs 2-4 follows whatever it is mapped to; the three
 // state sources (ready/busy/fault) are mutually exclusive, so mapping them to
 // three outputs gives a traffic light, while the rest are plain facts.
-static uint8_t  _outSrc[PANEL_OUTPUTS] = { DEF_PANEL_OUT2, DEF_PANEL_OUT3,
-                                           DEF_PANEL_OUT4 };
+static uint8_t  _outSrc[PANEL_OUTPUTS] = { DEF_PANEL_OUT1, DEF_PANEL_OUT2,
+                                           DEF_PANEL_OUT3, DEF_PANEL_OUT4 };
 static uint8_t  _outLit[PANEL_OUTPUTS] = {0};
 static uint32_t _outSince[PANEL_OUTPUTS] = {0};
 static uint8_t  _lampsOn = 1;
@@ -47,15 +47,20 @@ static void outWrite(uint8_t i, bool on);  // defined with the lamp logic
 static uint8_t  _forceOut = 0xFF;       // 0xFF = outputs follow their mapping
 static uint32_t _forceUntil = 0;
 
-// Index 0,1,2 -> outputs 2,3,4 on the terminal block. O1 is the shelf's
-// power and is never a lamp.
+// Index 0..3 -> outputs 1..4 on the terminal block.
 static int outPin(uint8_t i) {
     switch (i) {
-        case 0:  return PANEL_OUT_2;
-        case 1:  return PANEL_OUT_3;
+        case 0:  return PANEL_OUT_1;
+        case 1:  return PANEL_OUT_2;
+        case 2:  return PANEL_OUT_3;
         default: return PANEL_OUT_4;
     }
 }
+
+// An output carrying the shelf's power is not a lamp: it is not rate-limited
+// by the dwell, not switched off with the lamps, and not touched by a lamp
+// test. Cutting the cabinet to check a bulb would be a poor trade.
+static bool isShelf(uint8_t i) { return _outSrc[i] == SRC_SHELF; }
 
 // ── Cabinet shapes ─────────────────────────────────────────────────────────
 // The number in an LGS name is the slot count. 40 and 80 are plain blocks;
@@ -128,9 +133,10 @@ static void startSweep(uint8_t action) {
     _total = (action == PANEL_RESET) ? 0 : panel_slotCount(_cabinet);
     _nextStepAt = millis();
     if (action == PANEL_RESET) {
-        // Restored by the tick once _resetUntil passes, so a reset that
-        // starts is a reset that finishes even if the button is spammed.
-        digitalWrite(MODULE_RELAY_PIN, LOW);
+        // Only the deadline is set here; whichever output is mapped to the
+        // shelf's power follows it on the next tick and restores itself when
+        // it passes, so a reset that starts is a reset that finishes even if
+        // the button is spammed.
         _resetUntil = millis() + _resetMs;
     }
 }
@@ -174,8 +180,10 @@ void panel_applyConfig() {
     _lampHoldMs = c.panel_lamp_hold_ms;
     _lampDwellMs = c.panel_lamp_dwell_ms;
     _lampDead = c.panel_lamp_dead;
-    if (_lampsOn && !c.panel_lamps) {   // switched off: leave nothing lit
-        for (uint8_t i = 0; i < PANEL_OUTPUTS; i++) outWrite(i, false);
+    if (_lampsOn && !c.panel_lamps) {   // switched off: put the lamps out
+        for (uint8_t i = 0; i < PANEL_OUTPUTS; i++) {
+            if (!isShelf(i)) outWrite(i, false);
+        }
     }
     _lampsOn = c.panel_lamps;
     for (uint8_t i = 0; i < PANEL_OUTPUTS; i++) {
@@ -209,6 +217,8 @@ static bool sourceTrue(uint8_t src, uint8_t state) {
         case SRC_CLIENT: return tcpBridge_hasClient();
         case SRC_SWEEP:  return _running != PANEL_NONE;
         case SRC_RESET:  return _resetUntil != 0;
+        // Energised except while a reset is running — dropping it IS the reset.
+        case SRC_SHELF:  return _resetUntil == 0;
         default:         return false;      // SRC_NONE
     }
 }
@@ -224,14 +234,16 @@ static void lampUpdate(uint32_t now) {
         _forceOut = 0xFF;               // expired: hand the outputs back
         for (uint8_t i = 0; i < PANEL_OUTPUTS; i++) _outSince[i] = 0;
     }
-    if (!_lampsOn) return;              // outputs left exactly as they are
-
     const uint8_t state = gatewayState(now);
     for (uint8_t i = 0; i < PANEL_OUTPUTS; i++) {
+        // The shelf's power keeps running even when the lamps are switched
+        // off — that switch is about lamps, not about the cabinet.
+        if (!_lampsOn && !isShelf(i)) continue;
         const bool want = sourceTrue(_outSrc[i], state);
         if (want == (bool)_outLit[i]) continue;
-        // Relays, not LEDs: never switch one faster than the dwell.
-        if (_outSince[i] && now - _outSince[i] < _lampDwellMs) continue;
+        // Relays, not LEDs: never switch a LAMP faster than the dwell. The
+        // shelf's power is exempt — a reset must start and end on time.
+        if (!isShelf(i) && _outSince[i] && now - _outSince[i] < _lampDwellMs) continue;
         _outSince[i] = now;
         outWrite(i, want);
     }
@@ -240,7 +252,9 @@ static void lampUpdate(uint32_t now) {
 void panel_begin() {
     for (uint8_t i = 0; i < PANEL_OUTPUTS; i++) {
         pinMode(outPin(i), OUTPUT);
-        outWrite(i, false);         // dark until the first decision
+        // Lamps dark until the first decision; the shelf powered from the
+        // start, because a gateway booting must not cut the cabinet.
+        outWrite(i, isShelf(i));
         _outSince[i] = 0;
     }
 
@@ -261,8 +275,7 @@ void panel_update() {
     // A reset outlives the press that started it: restore the rails on time
     // whatever else is going on.
     if (_resetUntil && now >= _resetUntil) {
-        digitalWrite(MODULE_RELAY_PIN, HIGH);
-        _resetUntil = 0;
+        _resetUntil = 0;                // the shelf output follows below
         _running = PANEL_NONE;
     }
 
@@ -298,7 +311,8 @@ void panel_forceLamp(uint8_t out, uint32_t ms) {
     _forceOut = out;
     _forceUntil = millis() + ms;
     for (uint8_t i = 0; i < PANEL_OUTPUTS; i++) {
-        outWrite(i, out != PANEL_LAMP_OFF && (uint8_t)(i + 2) == out);
+        if (isShelf(i)) continue;       // never cut the cabinet to test a lamp
+        outWrite(i, out != PANEL_LAMP_OFF && (uint8_t)(i + 1) == out);
     }
 }
 
@@ -311,6 +325,7 @@ const char* panel_sourceName(uint8_t source) {
         case SRC_CLIENT: return "client";
         case SRC_SWEEP:  return "sweep";
         case SRC_RESET:  return "reset";
+        case SRC_SHELF:  return "shelf";
         default:         return "none";
     }
 }
@@ -321,7 +336,7 @@ const char* panel_lampName() {
     static char buf[8];
     if (!_lampsOn) return "off";
     for (uint8_t i = 0; i < PANEL_OUTPUTS; i++) {
-        buf[i] = _outLit[i] ? (char)('2' + i) : '-';
+        buf[i] = _outLit[i] ? (char)('1' + i) : '-';
     }
     buf[PANEL_OUTPUTS] = ' ';
     if (_forceOut != 0xFF) {

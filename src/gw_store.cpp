@@ -12,7 +12,9 @@
 // (what each output follows) — same three bytes, different question, and a
 // stored 2,3,4 silently read back as busy/fault/link.
 // v3: the scheduler's three fields were appended.
-#define GW_BLOB_SCHEMA  3
+// v4: panel_out grew from 3 outputs to 4 — output 1 (the shelf's power)
+// joined the same mapping, so every stored index shifted by one.
+#define GW_BLOB_SCHEMA  4
 #define GW_KVSTORE_PARTITION 3
 #define GW_KEY          "gwcfg"
 

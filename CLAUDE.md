@@ -55,9 +55,11 @@ All first-party code lives in `src/` + `include/` (~2000 lines).
 | `gw_store` | `TDBStore` on QSPI **partition 3**, CRC32 + magic blob, never formats or auto-writes |
 | `gw_console` | The `$LGS` text protocol: line state machine, verbs, session arming |
 | `gw_status` | Counters, RTT, LEDs, OTP MAC, reset reason, RTC-backed boot counter, safe mode |
+| `panel` | Front-panel buttons (inputs 1-5), cabinet sweeps, and the four relay outputs — lamps and the shelf's power, all mapped from config |
+| `sched` | Wall clock and the scheduled shelf reset |
 | `main.cpp` | Setup ordering (see below) and the loop |
 
-Function naming is module-prefixed: `tcpBridge_*`, `usbBridge_*`, `netRuntime_*`, `gwConfig_*`, `gwStore_*`, `gwConsole_*`, `gwStatus_*`, `rtu_*`.
+Function naming is module-prefixed: `tcpBridge_*`, `usbBridge_*`, `netRuntime_*`, `gwConfig_*`, `gwStore_*`, `gwConsole_*`, `gwStatus_*`, `panel_*`, `sched_*`, `rtu_*`.
 
 ### Setup ordering is the safety story
 
@@ -79,14 +81,20 @@ Edit over USB with `$LGS` lines (PuTTY at 115200 works; so does the Test Tool's 
 
 ```
 $LGS PING | INFO | HELP | GET [key]
+$LGS LAMP <1-4|off> [ms]      # drive one relay output, for wiring checks
+$LGS TIME [epoch]             # read or set the wall clock (LOCAL seconds)
 $LGS HELLO <who>              # arms a 120 s session — required before any write
 $LGS SET key=value ...        # staged only
 $LGS SAVE | DISCARD | DEFAULTS | REBOOT
 ```
 
+`LAMP` and `TIME` are deliberately **not** session-gated: neither outlives its own timeout, and a clock that needs a session to correct is a clock that spends its life wrong.
+
 Every command answers with exactly one terminal `#OK ...` or `#ERR ...` line, optionally preceded by `#DATA` lines. Errors are machine-readable (`err=range key=… allowed=…`).
 
-Keys: `sys.name`, `rs485.baud|predelay_us|postdelay_us|t1_ms|t2_ms`, `usb.gap_ms|max_ms`, `net.enabled|dhcp|ip|mask|gw|dns|port|link_timeout_ms`, `net.mac` (read-only). `sys.log` is a verb-level volatile toggle, deliberately **not** in `GwConfig`.
+Keys: `sys.name`, `rs485.*`, `usb.*`, `net.*` (`net.mac` read-only), `bus.hub_map|hub_retry|hub_gap_ms|hub_settle_ms|hub_budget_ms`, `panel.enabled|cabinet|btn1..btn5|step_ms|reset_ms|lamps|lamp_hold_ms|lamp_dwell_ms|lamp_dead|out1..out4`, `sched.reset_enabled|reset_hhmm|reset_days`. `sys.log` is a verb-level volatile toggle, deliberately **not** in `GwConfig`.
+
+The key table is **append-only**: `valueOf()`/`storeValue()` switch on the index, so inserting a key silently rewrites the meaning of every key after it.
 
 ## Hard-won gotchas — do not regress
 
@@ -95,12 +103,20 @@ Keys: `sys.name`, `rs485.baud|predelay_us|postdelay_us|t1_ms|t2_ms`, `usb.gap_ms
 - **Hand-typed console lines arrive one byte at a time.** The frame accumulator returns after ~10 ms of silence, so `gw_console` keeps its own line state across calls. Do not "simplify" it back into the accumulator.
 - **`Ethernet.begin()` is bounded, not infinite** — but its default timeout is 60 s, which looks like a hang. The 7-arg overload takes an explicit timeout; `net_runtime` passes `net.link_timeout_ms` (1500 ms). `begin()` starts the interface non-blocking and merely *polls* for the link, which is exactly why a cable plugged in later is picked up by `netRuntime_update()` without a reboot.
 - **`MbedServer::begin()` only allocates when its socket is null.** To move the listener to a new port you must `end()` first, or the re-bind silently fails.
+- **The stored blob's `schema` must be checked, and bumped when a field's MEANING changes** even if the struct size does not. It carried a schema field for months that nothing verified, and the day three bytes went from "which output is this colour on" to "what does this output follow", the old values were read straight back in and lit the wrong lamp. Size alone does not catch that.
+- **Anything that drives a relay must ask whether it is the shelf's power first.** The lamp test drives one output and clears the others; the lamps-off switch clears them all; the dwell rate-limits them. All three would cut the cabinet's power if they treated `SRC_SHELF` as a lamp, so each one skips it explicitly.
+- **The panel's sweeps must step from `loop()`, never block.** Eighty slots is several seconds of Modbus and the USB bridge, the TCP bridge and the watchdog all have to keep running through it.
+- **Nothing may be scheduled while the clock is unset.** The Opta's RTC has no battery, so a gateway that lost power believes it is January 1970 — and would fire its 03:00 reset the moment that fiction reached 03:00. `sched_update()` returns early unless `sched_setTime()` has been called since boot.
+- **The clock keeps wall time, not UTC**, and there is no timezone anywhere in the firmware. A tool setting it must send local seconds or every schedule is silently out by the offset.
+- **`INFO` values must not contain spaces.** The console's `key=value` lines are split on whitespace, so `time.now` is ISO with a `T`; a space truncated the value at the reader.
+- **The RS485 hub needs ~2 s of silence to change channel** (measured; see `modbus_rtu.cpp`). Repairing by retrying inside one transaction cannot work — the fix is to hold the next request in silence until the channel opens, and `bus.hub_budget_ms` must stay under the master's timeout or the bridge desynchronises.
 - **Never use `kv_set`/`kv_get` on the Opta.** The default KVStore config claims the whole 16 MB QSPI over the MBR, WiFi firmware and OTA slots. Use `TDBStore` on `MBRBlockDevice(..., 3)` as `gw_store` does.
 - **QSPI provisioning is a one-time manual step.** A board whose QSPI was never partitioned reports `cfg.store=unavailable`; fix it with Arduino's `QSPIFormat.ino` (partitions become WiFi 1 MB / OTA 5 MB / KVStore 1 MB / user data 7 MB). That sketch prints its banner before a late-attaching host sees it and then blocks silently, so send the first `Y` blind — and note `waitResponse()` accepts any stray y/n byte, so a command containing "N" answers "no" for you.
 - **`_getSecureEthMac_()` returns the byte count 6, not a success flag**, and falls back to a raw flash pointer when the OTP magic misses. Validate the bytes; `gwStatus_macValid()` does. When it is false the network hands `begin()` a `nullptr` so mbed derives a per-board address instead of every gateway sharing one.
 - In USB-bridge mode the COM port carries **binary RTU only**; one stray text byte corrupts the PC master's stream. That is why `LOG_SERIAL` is gated at runtime and off by default.
 - **Broadcasts (address 0) must not wait for a reply.** OTA streams chunks back-to-back; a first-byte timeout per chunk lets the next frames merge in the USB buffer and fail CRC. Both bridges call `rtu_send()` for address 0.
-- Module addressing: slave ID = `row*10 + col` on a **10×8** grid (11–18 … 101–108). Hardware-verified coils: 1021 (ON action), 1001 (OFF action).
+- Module addressing: slave ID = `row*10 + col` on a **10×8** grid (11–18 … 101–108). LGS-64 is not a rectangle: rows 1–3 and 8–10 are eight wide, rows 4–7 four wide.
+- Module coils are combinations, not steps: 1001 ring, 1011 ring + number, 1021 ring + latch, 1031 all three. The latch coils self-clear and mirror their state twin, so 1021 clears through 1001 and **1031 clears through 1011** — clearing 1031 through 1001 puts the ring out and leaves the display lit.
 - USB frame intake ends after `usb.gap_ms` of silence — if a PC tool produces split frames (CRC-drop symptoms), raise it rather than restructuring.
 - The blue USER LED lit = the bridge is live; with logging off it is the only boot-success indicator. `LED_D1` = Ethernet link, `LED_D3` = fault/safe mode.
 - Repo lives inside OneDrive. `.pio` is gitignored; if a build hits a file lock, just rerun (or pause sync).

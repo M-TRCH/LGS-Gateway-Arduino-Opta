@@ -51,18 +51,25 @@ enum PanelSource : uint8_t {
     SRC_CLIENT   = 5,   // a Modbus TCP client is connected
     SRC_SWEEP    = 6,   // a panel sweep is running
     SRC_RESET    = 7,   // the shelf's power is dropped right now
-    SRC_MAX      = 7,
+    // The shelf's own power: energised except while a reset is running. This
+    // is what makes a reset a reset, so it is not a lamp and never joins one:
+    // the dwell does not apply to it, switching the lamps off does not switch
+    // it off, and a lamp test leaves it alone.
+    SRC_SHELF    = 8,
+    SRC_MAX      = 8,
 };
 
-#define PANEL_OUTPUTS   3           // outputs 2, 3, 4
+#define PANEL_OUTPUTS   4           // outputs 1-4
 
 const char* panel_sourceName(uint8_t source);
 const char* panel_lampName();       // which outputs are lit, e.g. "-2-" or "off"
 
 /*  Force one output on for `ms`, ignoring what it is mapped to. This is how
  *  the panel's wiring is checked at the cabinet: drive each output in turn
- *  and watch which lamp answers. `out` is 2-4, or PANEL_LAMP_OFF for all
- *  three off. Expires on its own, so a console session that walks away
+ *  and watch which lamp answers. `out` is 1-4, or PANEL_LAMP_OFF for all
+ *  off. An output carrying the shelf's power is never touched either
+ *  way — a lamp test must not cut the cabinet.
+ *  Expires on its own, so a console session that walks away
  *  cannot leave the panel lying. */
 #define PANEL_LAMP_OFF  0xFE
 void panel_forceLamp(uint8_t out, uint32_t ms);

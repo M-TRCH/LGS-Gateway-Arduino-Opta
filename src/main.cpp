@@ -46,9 +46,11 @@ static void sampleBootButton(bool& forceDefaults, bool& eraseStore) {
 void setup() {
     Serial.begin(SERIAL_BAUD);
 
-    // O1 powers the shelf; O2-O4 are the panel lamps and belong to panel.cpp,
-    // which claims them in panel_begin().
-    pinMode(MODULE_RELAY_PIN, OUTPUT); digitalWrite(MODULE_RELAY_PIN, HIGH);
+    // The shelf's power comes up here, before anything can fail, and stays
+    // up: panel_begin() takes the outputs over once the config is loaded and
+    // energises whichever one is mapped to the shelf. Doing it in this order
+    // means a store that will not load costs the cabinet nothing.
+    pinMode(PANEL_OUT_1, OUTPUT); digitalWrite(PANEL_OUT_1, HIGH);
     pinMode(USB_MODE_LED_PIN, OUTPUT); digitalWrite(USB_MODE_LED_PIN, LOW);
 
     // Latches the reset reason, bumps the boot-attempt counter and caches the

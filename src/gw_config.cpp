@@ -56,9 +56,10 @@ static const KeyDef KEYS[] = {
     { "panel.lamp_hold_ms",   KIND_U16,  100, 5000,     false },
     { "panel.lamp_dwell_ms",  KIND_U16,  100, 2000,     false },
     { "panel.lamp_dead",      KIND_U16,  1, 100,        false },
-    { "panel.out2",           KIND_U16,  0, 7,          false },
-    { "panel.out3",           KIND_U16,  0, 7,          false },
-    { "panel.out4",           KIND_U16,  0, 7,          false },
+    { "panel.out1",           KIND_U16,  0, 8,          false },
+    { "panel.out2",           KIND_U16,  0, 8,          false },
+    { "panel.out3",           KIND_U16,  0, 8,          false },
+    { "panel.out4",           KIND_U16,  0, 8,          false },
     { "sched.reset_enabled",  KIND_BOOL, 0, 1,          false },
     { "sched.reset_hhmm",     KIND_U16,  0, 2359,       false },
     { "sched.reset_days",     KIND_U16,  0, 127,        false },
@@ -113,9 +114,10 @@ static void defaults(GwConfig& c) {
     c.panel_lamp_hold_ms   = DEF_PANEL_LAMP_HOLD_MS;
     c.panel_lamp_dwell_ms  = DEF_PANEL_LAMP_DWELL_MS;
     c.panel_lamp_dead      = DEF_PANEL_LAMP_DEAD;
-    c.panel_out[0]         = DEF_PANEL_OUT2;
-    c.panel_out[1]         = DEF_PANEL_OUT3;
-    c.panel_out[2]         = DEF_PANEL_OUT4;
+    c.panel_out[0]         = DEF_PANEL_OUT1;
+    c.panel_out[1]         = DEF_PANEL_OUT2;
+    c.panel_out[2]         = DEF_PANEL_OUT3;
+    c.panel_out[3]         = DEF_PANEL_OUT4;
     c.sched_reset_enabled  = DEF_SCHED_RESET_ENABLED;
     c.sched_reset_hhmm     = DEF_SCHED_RESET_HHMM;
     c.sched_reset_days     = DEF_SCHED_RESET_DAYS;
@@ -182,9 +184,10 @@ static uint32_t valueOf(const GwConfig& c, int i) {
         case 35: return c.panel_out[0];
         case 36: return c.panel_out[1];
         case 37: return c.panel_out[2];
-        case 38: return c.sched_reset_enabled;
-        case 39: return c.sched_reset_hhmm;
-        case 40: return c.sched_reset_days;
+        case 38: return c.panel_out[3];
+        case 39: return c.sched_reset_enabled;
+        case 40: return c.sched_reset_hhmm;
+        case 41: return c.sched_reset_days;
         default: return 0;
     }
 }
@@ -226,9 +229,10 @@ static void storeValue(GwConfig& c, int i, uint32_t v) {
         case 35: c.panel_out[0]        = (uint8_t)v; break;
         case 36: c.panel_out[1]        = (uint8_t)v; break;
         case 37: c.panel_out[2]        = (uint8_t)v; break;
-        case 38: c.sched_reset_enabled = (uint8_t)v; break;
-        case 39: c.sched_reset_hhmm    = (uint16_t)v; break;
-        case 40: c.sched_reset_days    = (uint8_t)v; break;
+        case 38: c.panel_out[3]        = (uint8_t)v; break;
+        case 39: c.sched_reset_enabled = (uint8_t)v; break;
+        case 40: c.sched_reset_hhmm    = (uint16_t)v; break;
+        case 41: c.sched_reset_days    = (uint8_t)v; break;
         default: break;
     }
 }

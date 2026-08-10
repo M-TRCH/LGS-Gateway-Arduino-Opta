@@ -244,10 +244,22 @@ bool gwConfig_format(int i, bool staged, char* out, size_t n) {
             return true;
         case KIND_HUBMAP: {
             // Row 1..N as a comma list, so the wiring reads back the way
-            // someone would describe it at the cabinet.
+            // someone would describe it at the cabinet. Trailing zeros are
+            // dropped: not every LGS has ten rows, and a five-row cabinet
+            // should read "1,1,1,1,1" rather than pad five rows of nothing.
+            // Zeros *between* rows are kept — those say the row is not behind
+            // the hub, which is wiring, not absence.
+            int last = -1;
+            for (int r = 0; r < GW_HUB_MAX_ROWS; r++) {
+                if (c.hub_map[r]) last = r;
+            }
+            if (last < 0) {                     // no hub anywhere
+                snprintf(out, n, "0");
+                return true;
+            }
             size_t at = 0;
             out[0] = ' ';
-            for (int r = 0; r < GW_HUB_MAX_ROWS && at + 4 < n; r++) {
+            for (int r = 0; r <= last && at + 4 < n; r++) {
                 at += snprintf(out + at, n - at, r ? ",%u" : "%u",
                                (unsigned)c.hub_map[r]);
             }

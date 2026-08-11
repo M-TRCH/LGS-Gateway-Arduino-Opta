@@ -38,6 +38,17 @@ void gwStatus_setSessionArmed(bool on);   // console session indicator
 void gwStatus_setFault(bool on);          // store/config fault or safe mode
 void gwStatus_update();
 
+// Hardware watchdog — here beside the reset reason, because this is the module
+// that has to explain "sys.reset=watchdog" afterwards.
+//
+// Started partway through setup() rather than at the end: everything after the
+// config loads can block, and a board that wedges in setup() never reaches
+// loop(). If the hardware refuses the requested period the compiled default is
+// used instead — a stored value must never leave the board unprotected.
+void     gwStatus_watchdogBegin(uint16_t ms);
+void     gwStatus_watchdogKick();
+uint16_t gwStatus_watchdogMs();           // effective period; 0 = not running
+
 // Boot health
 uint8_t     gwStatus_bootAttempts();
 bool        gwStatus_safeMode();

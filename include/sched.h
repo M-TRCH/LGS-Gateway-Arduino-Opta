@@ -20,6 +20,12 @@
  *  The clock keeps WALL time — the time on the wall in front of the cabinet —
  *  not UTC. There is no timezone anywhere in this firmware, and a schedule
  *  that says 03:00 means the 03:00 the pharmacist would recognise.
+ *
+ *  There are GW_SCHED_SLOTS times, each armed by its own bit in
+ *  `sched.reset_slots`, all sharing one set of days and one master switch. A
+ *  site wanting a single nightly reset arms one; a site wanting one per shift
+ *  arms four. A disarmed slot keeps its time, so turning it back on does not
+ *  mean typing the hour again.
  */
 
 void sched_begin();
@@ -33,7 +39,8 @@ uint32_t sched_now();               // 0 when unset
 
 // "2026-08-10 15:31:07", or "unset"
 void sched_formatNow(char* out, size_t n);
-// "03:00 daily", "03:00 Mon,Wed", "off", or "waiting for the time"
+// "03:00@daily", "03:00,15:00@Mon,Wed", "off", "on_but_no_slots", or
+// "waiting_for_clock". Never contains a space — see the definition.
 void sched_describeNext(char* out, size_t n);
 
 uint32_t sched_lastFireEpoch();     // 0 = has not fired since boot

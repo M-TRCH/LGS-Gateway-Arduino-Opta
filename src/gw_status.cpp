@@ -1,6 +1,7 @@
 #include "gw_status.h"
 
 #include <stm32h7xx_hal.h>
+#include <drivers/Watchdog.h>
 
 // The variant already owns an RTC handle and uses RTC_BKP_DR0 as the
 // 1200 bps bootloader magic; DR1 upward are free.
@@ -24,6 +25,26 @@ static uint8_t  _mac[6];
 static bool     _macValid;
 static uint32_t _lastRs485Ms = 0;
 static unsigned long _rs485PulseUntil;
+static uint16_t _wdtMs = 0;         // 0 until the watchdog is actually running
+
+// ── Watchdog ───────────────────────────────────────────────────────────────
+void gwStatus_watchdogBegin(uint16_t ms) {
+    if (mbed::Watchdog::get_instance().start(ms)) { _wdtMs = ms; return; }
+    // The IWDG can refuse a period the H7's prescaler cannot reach. Falling
+    // back keeps a stored value from being able to disarm the watchdog.
+    if (mbed::Watchdog::get_instance().start(DEF_WATCHDOG_MS)) {
+        _wdtMs = DEF_WATCHDOG_MS;
+        LOG_SERIAL.println("[SYS] sys.wdt_ms refused by the hardware — default used");
+    } else {
+        LOG_SERIAL.println("[SYS] watchdog unavailable");
+    }
+}
+
+void gwStatus_watchdogKick() {
+    if (_wdtMs) mbed::Watchdog::get_instance().kick();
+}
+
+uint16_t gwStatus_watchdogMs() { return _wdtMs; }
 
 // A unicast address that is neither all-zero nor all-ones. Enough to tell a
 // real OTP address from whatever happened to be at the fallback flash offset.

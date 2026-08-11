@@ -5,7 +5,10 @@
 #include "tcp_bridge.h"
 
 #define LINK_POLL_MS        500UL
-#define DHCP_RESPONSE_MS    4000UL
+// One definition, in config.h: the watchdog is sized around this wait, and a
+// second copy here would let the two drift until the gateway reset itself
+// mid-boot for reasons nothing could explain.
+#define DHCP_RESPONSE_MS    NET_DHCP_RESPONSE_MS
 
 static NetState      _state = NetState::DISABLED;
 static unsigned long _nextPollMs;

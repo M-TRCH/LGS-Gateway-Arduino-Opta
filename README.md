@@ -33,6 +33,8 @@ Each button runs its action across the whole cabinet, one slot at a time from `l
 
 Defaults follow the cabinet as built: red = all_on, green = all_off, blue = all_unlock, white = reset, yellow unassigned. `panel.enabled` is **off** by default, so a bench unit with nothing wired to its inputs cannot sweep somebody's cabinet.
 
+Which slots a sweep walks comes from `panel.cabinet` (40, 64 or 80 — the catalogue shapes, hard-coded). A cabinet that is none of those sets **`panel.shape`** instead: slots per row from the top, `8,8,8,4,4,4,4,8,8,8` style, up to ten rows of 0–8. When the shape is non-zero it overrides the preset; `0` clears it. The Test Tool's header cabinet picker keeps both in step and warns when they disagree.
+
 ### Relay outputs (1–4)
 
 Each output follows one source. Ready, busy and fault are three faces of one state, so mapping those to three outputs gives a traffic light — exactly one lit, worst news first.
@@ -68,7 +70,24 @@ $LGS TIME              read the clock
 $LGS TIME 1786380152   set it (seconds since 1970, LOCAL)
 ```
 
-`sched.reset_enabled` / `sched.reset_hhmm` (300 = 03:00) / `sched.reset_days` (bit0 = Sunday, 0 = every day) fire the same path the reset button takes. `sched.last` in `INFO` answers "did it actually run?", which matters for something that is over in a second and a half at three in the morning.
+There are **four times**, each armed by its own bit in `sched.reset_slots` (bit 0 = slot 1), all sharing one set of days and one master switch — a site wanting a single nightly reset arms one, a site wanting one per shift arms four. A disarmed slot keeps its time, so turning it back on later does not mean typing the hour again.
+
+| Key | Meaning |
+|---|---|
+| `sched.reset_enabled` | the master switch for all four |
+| `sched.reset_hhmm`, `_hhmm2`, `_hhmm3`, `_hhmm4` | slots 1–4, as a clock reading (300 = 03:00) |
+| `sched.reset_slots` | which slots are armed, bit 0 = slot 1 |
+| `sched.reset_days` | bit 0 = Sunday, 0 = every day |
+
+They fire the same path the reset button takes. `sched.last` in `INFO` answers "did it actually run?", which matters for something that is over in a second and a half at three in the morning; `sched.reset` reads back as `03:00,15:00@Mon,Wed`, or `on_but_no_slots` when the switch is on and nothing is ticked — a state worth saying out loud rather than showing as "off".
+
+## Watchdog
+
+The board resets itself if `loop()` stops running for `sys.wdt_ms` (default 8000). That is well clear of the longest legitimate stall — a cross-channel RS485 hold, about 2.2 s — and short enough to bring a wedged gateway back before anyone walks to the cabinet. The reset reason then reads `sys.reset=watchdog`, and three failed boots in a row drop the unit into safe mode on factory defaults, so a stored value that hangs the board heals itself with no tooling.
+
+It starts **partway through `setup()`**, as soon as the config has loaded, rather than at the end: everything after that point can block — the QSPI store, the first bus traffic, and above all the boot-time wait for an Ethernet link — and a board that wedges in `setup()` never reaches `loop()` at all. For the same reason the period has to outlast that boot-time wait, so `SAVE` refuses a `sys.wdt_ms` shorter than `net.link_timeout_ms` (plus the DHCP allowance when DHCP is on) rather than let the gateway reset itself forever while waiting for its own LAN.
+
+A change takes effect on the next restart: the STM32's independent watchdog cannot be reconfigured once it is running. `INFO` reports `sys.wdt` — the period *actually* running, which is the compiled default if the hardware refused the stored one.
 
 ## RS485 switch hub
 
@@ -154,4 +173,10 @@ Cloned from [`M-TRCH/LGS-Master`](https://github.com/M-TRCH/LGS-Master) branch `
 
 **ทุกอย่างตั้งค่าตอนใช้งานได้** ผ่านคำสั่งข้อความ `$LGS` บนสาย USB (ปกติสั่งจากแท็บ Gateway ของ LGS Test Tool) เฟิร์มแวร์ตัวเดียวจึงใช้ได้ทุกหน้างาน — ปุ่มไหนทำอะไร รีเลย์ไหนเป็นไฟสีอะไรหรือเป็นไฟเลี้ยงชั้นวาง ผังสาย RS485 hub ไปจนถึงเวลารีเซตอัตโนมัติ ล้วนเป็นค่าตั้งทั้งหมด
 
-ข้อควรรู้สองเรื่อง: **hub สลับช่องต้องเงียบราว 2 วินาที** เกตเวย์จึงหน่วงคำขอไว้เงียบๆ จนช่องพร้อมแทนการยิงซ้ำรัว (ฝั่งเซิร์ฟเวอร์ต้องตั้ง retry ≥ 1 หรือ timeout ≥ 2.6 วิ) และ **นาฬิกาของ Opta ไม่มีแบตเตอรี่** เวลาหายทุกครั้งที่ไฟดับ ระบบจึงไม่ยิงตารางใดๆ จนกว่าจะมีคนตั้งเวลา (Test Tool ตั้งให้เองอัตโนมัติ) และนาฬิกาเก็บเวลาท้องถิ่น ไม่ใช่ UTC
+ข้อควรรู้สามเรื่อง:
+
+**hub สลับช่องต้องเงียบราว 2 วินาที** เกตเวย์จึงหน่วงคำขอไว้เงียบๆ จนช่องพร้อมแทนการยิงซ้ำรัว (ฝั่งเซิร์ฟเวอร์ต้องตั้ง retry ≥ 1 หรือ timeout ≥ 2.6 วิ)
+
+**นาฬิกาของ Opta ไม่มีแบตเตอรี่** เวลาหายทุกครั้งที่ไฟดับ ระบบจึงไม่ยิงตารางใดๆ จนกว่าจะมีคนตั้งเวลา (Test Tool ตั้งให้เองอัตโนมัติ) และนาฬิกาเก็บเวลาท้องถิ่น ไม่ใช่ UTC ตารางรีเซตตั้งได้ **4 ช่วงต่อวัน** ติ๊กเปิดเฉพาะช่วงที่ต้องการ ช่วงที่ปิดไว้ยังเก็บเวลาเดิม
+
+**watchdog** จะรีเซตบอร์ดถ้าเฟิร์มแวร์หยุดทำงานเกิน `sys.wdt_ms` (ค่าเริ่มต้น 8000 มิลลิวินาที) เริ่มทำงานตั้งแต่กลาง `setup()` จึงครอบคลุมช่วงรอลิงก์ Ethernet ที่เป็นจุดค้างได้จริง — และด้วยเหตุนี้ค่าที่ตั้งต้องมากกว่าเวลารอลิงก์ ไม่งั้นบอร์ดจะรีเซตตัวเองวนไม่จบ (ระบบตรวจให้แล้วตอน SAVE) การเปลี่ยนค่ามีผลเมื่อรีสตาร์ท เพราะ IWDG ของ STM32 ตั้งใหม่ระหว่างทำงานไม่ได้

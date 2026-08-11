@@ -32,8 +32,20 @@
 #define GW_HUB_MAX_ROWS   10        // slave IDs 11-108 -> rows 1-10
 #define GW_HUB_MAX_CH     8
 
+// The sweep shape shares the grid's bounds: rows 1-10, up to 8 slots each.
+#define GW_SHAPE_ROWS     10
+#define GW_SHAPE_MAX_COLS 8
+
+// How many times a day the shelf may be power-cycled on a schedule. Four
+// covers a time per shift with one spare; each slot is armed independently,
+// so a site that wants one nightly reset simply leaves the other three off.
+#define GW_SCHED_SLOTS    4
+
 struct GwConfig {
     char     sys_name[16];
+    // Hardware watchdog period. Reboot-only: the IWDG cannot be reconfigured
+    // once it is running.
+    uint16_t sys_wdt_ms;
     uint8_t  hub_map[GW_HUB_MAX_ROWS];   // row 1..10 -> channel 1..8, 0 = none
     uint8_t  hub_retry;                  // attempts for the crossing txn itself
     uint16_t hub_gap_ms;                 // margin added past the settle deadline
@@ -73,11 +85,22 @@ struct GwConfig {
     // call, and even which relay carries the shelf's power is a wiring
     // decision — so all of it lives here rather than in the firmware.
     uint8_t  panel_out[4];              // outputs 1, 2, 3, 4
+    // The sweep's own shape: slots per row, rows 1-10, 0 = row absent.
+    // All-zero means "follow panel_cabinet's preset", which is what every
+    // catalogue cabinet wants — this exists for the cabinet that is not a
+    // 40/64/80, so its front-panel buttons can still walk the real slots.
+    uint8_t  panel_shape[GW_SHAPE_ROWS];
     // Scheduled power cycle of the shelf. The clock itself is not stored —
     // the Opta cannot keep it through a power cut, so it is set at runtime
     // and the schedule simply does nothing until it has been.
-    uint8_t  sched_reset_enabled;
-    uint16_t sched_reset_hhmm;          // 0-2359, wall time
+    //
+    // Four slots, each armed by its own bit in sched_reset_slots. A time is
+    // kept even while its slot is off, so turning a slot back on does not
+    // mean typing the hour again — and a disarmed slot can never fire, which
+    // a "magic value means unused" scheme could not promise.
+    uint8_t  sched_reset_enabled;       // the master switch for all four
+    uint16_t sched_reset_hhmm[GW_SCHED_SLOTS];  // 0-2359, wall time
+    uint8_t  sched_reset_slots;         // bit0 = slot 1 .. bit3 = slot 4
     uint8_t  sched_reset_days;          // bit0=Sun..bit6=Sat, 0 = every day
 };
 

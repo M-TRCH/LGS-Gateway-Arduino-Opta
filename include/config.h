@@ -141,7 +141,32 @@ extern bool g_logEnabled;
 // Off by default. A cabinet that power-cycles itself at an hour nobody chose
 // is a fault, not a feature.
 #define DEF_SCHED_RESET_ENABLED 0
-#define DEF_SCHED_RESET_HHMM    300     // 03:00, as HHMM
+#define DEF_SCHED_RESET_HHMM    300     // slot 1: 03:00, as HHMM
+#define DEF_SCHED_RESET_HHMM2   900     // slot 2: 09:00 — a time, not a plan;
+#define DEF_SCHED_RESET_HHMM3   1500    // slot 3: 15:00   the slots ship off,
+#define DEF_SCHED_RESET_HHMM4   2100    // slot 4: 21:00   so these only spare
+                                        //                 typing on the first
+                                        //                 tick
+#define DEF_SCHED_RESET_SLOTS   0x01    // bit0=slot1..bit3=slot4; slot 1 only
 #define DEF_SCHED_RESET_DAYS    0       // 0 = every day; else bit0=Sun..bit6=Sat
+
+// ── Factory default: watchdog ──────────────────────────────────────────────
+// The hardware watchdog resets the board if loop() stops running. 8 s is well
+// clear of the worst legitimate stall (a cross-channel RS485 hold, ~2.2 s)
+// while still bringing a wedged gateway back before anyone walks to the
+// cabinet. Runtime-settable at `sys.wdt_ms`, because the worst legitimate
+// stall depends on the site's wiring — the hub, and the boot-time wait for an
+// Ethernet link, both live in config.
+//
+// The STM32's IWDG cannot be reconfigured once started, so a change takes
+// effect on the next boot; the key is marked reboot-only for that reason.
+#define DEF_WATCHDOG_MS         8000
+#define MIN_WATCHDOG_MS         1000
+#define MAX_WATCHDOG_MS         30000   // IWDG tops out near 32.7 s on the H7
+
+// Longest DHCP wait netRuntime_begin() may add on top of net.link_timeout_ms.
+// Here rather than in net_runtime.cpp because the watchdog has to be sized
+// around it: this is the one stall in setup() that outlasts everything else.
+#define NET_DHCP_RESPONSE_MS    4000UL
 
 #endif // CONFIG_H

@@ -77,14 +77,26 @@ static void doInfo() {
     int macIdx = gwConfig_indexOf("net.mac");
     gwConfig_format(macIdx, false, mac, sizeof(mac));
 
+    // __DATE__ is "Aug 11 2026" — spaces, which the console's key=value
+    // reader splits on; `build` arrived as just "Aug" for every version
+    // until the site report printed it. Sent with underscores instead.
+    char build[16];
+    snprintf(build, sizeof(build), "%s", GW_FW_BUILD);
+    for (char* p = build; *p; p++) {
+        if (*p == ' ') *p = '_';
+    }
     emitf("#DATA fw=%s build=%s hw=opta id=%s mac=%s macsrc=%s",
-          GW_FW_VERSION, GW_FW_BUILD, serial, mac,
+          GW_FW_VERSION, build, serial, mac,
           gwStatus_macValid() ? "board" : "placeholder");
     emitf("#DATA sys.name=%s sys.log=%d sys.up=%lu sys.reset=%s",
           gwConfig_active().sys_name, g_logEnabled ? 1 : 0,
           (unsigned long)gwStatus_uptimeS(), gwStatus_resetReason());
-    emitf("#DATA sys.safe=%d sys.boots=%u sys.btn=%d",
-          gwStatus_safeMode() ? 1 : 0, gwStatus_bootAttempts(), gwStatus_buttonRaw());
+    // sys.wdt is the period actually running, which is not always the one that
+    // was asked for — the hardware may have refused it and been given the
+    // default instead. Reporting the stored value would hide that.
+    emitf("#DATA sys.safe=%d sys.boots=%u sys.btn=%d sys.wdt=%u",
+          gwStatus_safeMode() ? 1 : 0, gwStatus_bootAttempts(), gwStatus_buttonRaw(),
+          gwStatus_watchdogMs());
     // cfg.why carries gwStore's own reason when the store is down. Without it
     // a failed save says only "store_unavailable", which reads the same for
     // an unformatted QSPI, a missing partition and a corrupt TDBStore — three
@@ -113,7 +125,7 @@ static void doInfo() {
     emitf("#DATA panel.state=%s panel.step=%u/%u panel.in=0x%02X panel.lamp=%s",
           panel_stateName(), panel_progress(), panel_total(),
           (unsigned)panel_inputMask(), panel_lampName());
-    char nowStr[24], nextStr[40];
+    char nowStr[24], nextStr[72];       // four times plus a day list
     sched_formatNow(nowStr, sizeof(nowStr));
     sched_describeNext(nextStr, sizeof(nextStr));
     // sched.last answers "did it actually run?" — a reset is over in a

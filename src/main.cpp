@@ -1,6 +1,5 @@
 #include <ArduinoRS485.h>
 #include <mbed_wait_api.h>
-#include <drivers/Watchdog.h>
 
 #include "config.h"
 #include "gw_config.h"
@@ -14,7 +13,6 @@
 #include "usb_bridge.h"
 #include "version.h"
 
-#define WATCHDOG_MS       8000      // >> the worst legitimate stall (~2.2 s)
 #define HEALTHY_AFTER_MS  10000     // loop must run this long to clear the
                                     // boot-attempt counter
 #define BTN_RECOVERY_MS   3000
@@ -68,6 +66,10 @@ void setup() {
     if (eraseStore) gwStore_erase();
     gwConfig_begin(forceDefaults);
 
+    // The earliest point the configured period is known. Everything below can
+    // block; nothing below is allowed to hang the cabinet.
+    gwStatus_watchdogBegin(gwConfig_active().sys_wdt_ms);
+
     // From here the bridge is live. Everything above is bounded; everything
     // below is optional. This ordering is the whole safety story: no stored
     // value and no storage failure can cost the USB bridge.
@@ -78,18 +80,21 @@ void setup() {
     digitalWrite(USB_MODE_LED_PIN, HIGH);
 
     // Optional, and deliberately last: the worst a missing cable or a wrong
-    // address can cost is net.link_timeout_ms of extra boot time.
+    // address can cost is net.link_timeout_ms of extra boot time. That wait is
+    // the longest legitimate stall in the whole boot, so the watchdog is fed
+    // immediately before it — and gwConfig_validateStaged() refuses a period
+    // too short to survive it.
+    gwStatus_watchdogKick();
     netRuntime_begin();
 
     LOG_SERIAL.print("[SYS] LGS gateway "); LOG_SERIAL.print(GW_FW_VERSION);
     LOG_SERIAL.print(" up, config="); LOG_SERIAL.print(gwConfig_sourceName());
-    LOG_SERIAL.print(", net="); LOG_SERIAL.println(netRuntime_stateName());
-
-    mbed::Watchdog::get_instance().start(WATCHDOG_MS);
+    LOG_SERIAL.print(", net="); LOG_SERIAL.print(netRuntime_stateName());
+    LOG_SERIAL.print(", wdt="); LOG_SERIAL.println(gwStatus_watchdogMs());
 }
 
 void loop() {
-    mbed::Watchdog::get_instance().kick();
+    gwStatus_watchdogKick();
 
     usbBridge_update();
     gwConsole_update();

@@ -88,9 +88,15 @@ uint16_t    panel_progress();       // slots done in the current sweep
 uint16_t    panel_total();          // slots in the current sweep, 0 when idle
 uint8_t     panel_inputMask();      // live input levels, bit0 = input 1
 
-// The slot at `index` of a cabinet, or 0 past the end. Exposed for the
-// console so the wiring can be checked without guessing the order.
+// The slot at `index` of a preset cabinet, or 0 past the end. Exposed for
+// the console so the wiring can be checked without guessing the order.
 uint8_t panel_slotAt(uint16_t cabinet, uint16_t index);
 uint16_t panel_slotCount(uint16_t cabinet);
+
+// What the sweeps actually walk: `panel.shape` (slots per row) when one is
+// set, else `panel.cabinet`'s preset — so the cabinet that is not a
+// 40/64/80 still gets working front-panel buttons.
+uint8_t  panel_activeSlotAt(uint16_t index);
+uint16_t panel_activeSlotCount();
 
 #endif // PANEL_H

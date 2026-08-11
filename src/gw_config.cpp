@@ -10,7 +10,7 @@
 
 // ── Key table ──────────────────────────────────────────────────────────────
 enum GwKind : uint8_t { KIND_STR, KIND_BOOL, KIND_U16, KIND_U32, KIND_IP, KIND_MAC_RO,
-                        KIND_HUBMAP };
+                        KIND_HUBMAP, KIND_SHAPE };
 
 struct KeyDef {
     const char* name;
@@ -63,6 +63,13 @@ static const KeyDef KEYS[] = {
     { "sched.reset_enabled",  KIND_BOOL, 0, 1,          false },
     { "sched.reset_hhmm",     KIND_U16,  0, 2359,       false },
     { "sched.reset_days",     KIND_U16,  0, 127,        false },
+    { "sched.reset_hhmm2",    KIND_U16,  0, 2359,       false },
+    { "sched.reset_hhmm3",    KIND_U16,  0, 2359,       false },
+    { "sched.reset_hhmm4",    KIND_U16,  0, 2359,       false },
+    { "sched.reset_slots",    KIND_U16,  0, 15,         false },
+    // Reboot-only: the IWDG cannot be reconfigured once it is running.
+    { "sys.wdt_ms",           KIND_U16,  MIN_WATCHDOG_MS, MAX_WATCHDOG_MS, true },
+    { "panel.shape",          KIND_SHAPE, 0, 0,         false },
 };
 static const int KEY_N = (int)(sizeof(KEYS) / sizeof(KEYS[0]));
 
@@ -119,8 +126,13 @@ static void defaults(GwConfig& c) {
     c.panel_out[2]         = DEF_PANEL_OUT3;
     c.panel_out[3]         = DEF_PANEL_OUT4;
     c.sched_reset_enabled  = DEF_SCHED_RESET_ENABLED;
-    c.sched_reset_hhmm     = DEF_SCHED_RESET_HHMM;
+    c.sched_reset_hhmm[0]  = DEF_SCHED_RESET_HHMM;
+    c.sched_reset_hhmm[1]  = DEF_SCHED_RESET_HHMM2;
+    c.sched_reset_hhmm[2]  = DEF_SCHED_RESET_HHMM3;
+    c.sched_reset_hhmm[3]  = DEF_SCHED_RESET_HHMM4;
+    c.sched_reset_slots    = DEF_SCHED_RESET_SLOTS;
     c.sched_reset_days     = DEF_SCHED_RESET_DAYS;
+    c.sys_wdt_ms           = DEF_WATCHDOG_MS;
 }
 
 static bool parseIp(const char* s, uint32_t* out) {
@@ -145,6 +157,64 @@ static bool parseU32(const char* s, uint32_t* out) {
     if (end == s || (end && *end != '\0')) return false;
     *out = (uint32_t)v;
     return true;
+}
+
+/*  A per-row comma list — the shape both the hub map and the sweep shape
+ *  take: "8,8,8,4,4,4,4,8,8,8", one value per row from the top, up to
+ *  `maxRows` rows of 0..`maxVal`. Parsed into a scratch copy first, so a bad
+ *  entry half way along cannot leave the staged copy half-written.
+ */
+static int parseRowList(const char* value, uint8_t* out, int maxRows,
+                        int maxVal, const char* keyName,
+                        char* err, size_t errN) {
+    uint8_t scratch[GW_HUB_MAX_ROWS];       // both users share the grid's rows
+    memset(scratch, 0, sizeof(scratch));
+    int row = 0;
+    const char* p = value;
+    while (*p && row < maxRows) {
+        char* end = nullptr;
+        long v = strtol(p, &end, 10);
+        if (end == p || v < 0 || v > maxVal) {
+            snprintf(err, errN, "err=range key=%s allowed=0-%d_per_row",
+                     keyName, maxVal);
+            return -1;
+        }
+        scratch[row++] = (uint8_t)v;
+        p = end;
+        while (*p == ' ') p++;
+        if (*p == ',') { p++; while (*p == ' ') p++; }
+        else if (*p) {
+            snprintf(err, errN, "err=range key=%s allowed=comma_list", keyName);
+            return -1;
+        }
+    }
+    if (*p) {
+        snprintf(err, errN, "err=range key=%s allowed=max%drows",
+                 keyName, maxRows);
+        return -1;
+    }
+    memcpy(out, scratch, (size_t)maxRows);
+    return 0;
+}
+
+// Row 1..N as a comma list, trailing zeros dropped: a five-row cabinet reads
+// "1,1,1,1,1" rather than pad five rows of nothing. Zeros *between* rows are
+// kept — those say the row is absent, which is wiring, not absence of data.
+// An all-zero list reads "0".
+static void formatRowList(const uint8_t* arr, int rows, char* out, size_t n) {
+    int last = -1;
+    for (int r = 0; r < rows; r++) {
+        if (arr[r]) last = r;
+    }
+    if (last < 0) {
+        snprintf(out, n, "0");
+        return;
+    }
+    size_t at = 0;
+    out[0] = '\0';
+    for (int r = 0; r <= last && at + 4 < n; r++) {
+        at += snprintf(out + at, n - at, r ? ",%u" : "%u", (unsigned)arr[r]);
+    }
 }
 
 static uint32_t valueOf(const GwConfig& c, int i) {
@@ -186,8 +256,13 @@ static uint32_t valueOf(const GwConfig& c, int i) {
         case 37: return c.panel_out[2];
         case 38: return c.panel_out[3];
         case 39: return c.sched_reset_enabled;
-        case 40: return c.sched_reset_hhmm;
+        case 40: return c.sched_reset_hhmm[0];
         case 41: return c.sched_reset_days;
+        case 42: return c.sched_reset_hhmm[1];
+        case 43: return c.sched_reset_hhmm[2];
+        case 44: return c.sched_reset_hhmm[3];
+        case 45: return c.sched_reset_slots;
+        case 46: return c.sys_wdt_ms;
         default: return 0;
     }
 }
@@ -231,8 +306,13 @@ static void storeValue(GwConfig& c, int i, uint32_t v) {
         case 37: c.panel_out[2]        = (uint8_t)v; break;
         case 38: c.panel_out[3]        = (uint8_t)v; break;
         case 39: c.sched_reset_enabled = (uint8_t)v; break;
-        case 40: c.sched_reset_hhmm    = (uint16_t)v; break;
+        case 40: c.sched_reset_hhmm[0] = (uint16_t)v; break;
         case 41: c.sched_reset_days    = (uint8_t)v; break;
+        case 42: c.sched_reset_hhmm[1] = (uint16_t)v; break;
+        case 43: c.sched_reset_hhmm[2] = (uint16_t)v; break;
+        case 44: c.sched_reset_hhmm[3] = (uint16_t)v; break;
+        case 45: c.sched_reset_slots   = (uint8_t)v; break;
+        case 46: c.sys_wdt_ms          = (uint16_t)v; break;
         default: break;
     }
 }
@@ -311,6 +391,9 @@ bool gwConfig_differs(int i) {
     if (i == 0) return strncmp(_active.sys_name, _staged.sys_name, sizeof(_active.sys_name)) != 0;
     if (KEYS[i].kind == KIND_HUBMAP)
         return memcmp(_active.hub_map, _staged.hub_map, sizeof(_active.hub_map)) != 0;
+    if (KEYS[i].kind == KIND_SHAPE)
+        return memcmp(_active.panel_shape, _staged.panel_shape,
+                      sizeof(_active.panel_shape)) != 0;
     return valueOf(_active, i) != valueOf(_staged, i);
 }
 
@@ -327,29 +410,12 @@ bool gwConfig_format(int i, bool staged, char* out, size_t n) {
         case KIND_STR:
             snprintf(out, n, "%s", c.sys_name);
             return true;
-        case KIND_HUBMAP: {
-            // Row 1..N as a comma list, so the wiring reads back the way
-            // someone would describe it at the cabinet. Trailing zeros are
-            // dropped: not every LGS has ten rows, and a five-row cabinet
-            // should read "1,1,1,1,1" rather than pad five rows of nothing.
-            // Zeros *between* rows are kept — those say the row is not behind
-            // the hub, which is wiring, not absence.
-            int last = -1;
-            for (int r = 0; r < GW_HUB_MAX_ROWS; r++) {
-                if (c.hub_map[r]) last = r;
-            }
-            if (last < 0) {                     // no hub anywhere
-                snprintf(out, n, "0");
-                return true;
-            }
-            size_t at = 0;
-            out[0] = ' ';
-            for (int r = 0; r <= last && at + 4 < n; r++) {
-                at += snprintf(out + at, n - at, r ? ",%u" : "%u",
-                               (unsigned)c.hub_map[r]);
-            }
+        case KIND_HUBMAP:
+            formatRowList(c.hub_map, GW_HUB_MAX_ROWS, out, n);
             return true;
-        }
+        case KIND_SHAPE:
+            formatRowList(c.panel_shape, GW_SHAPE_ROWS, out, n);
+            return true;
         case KIND_IP:
             formatIp(valueOf(c, i), out, n);
             return true;
@@ -394,37 +460,17 @@ int gwConfig_set(int i, const char* value, char* err, size_t errN) {
     }
 
     if (k.kind == KIND_HUBMAP) {
-        // "1,2,3,4,5,6,7,8,1,2" — row 1..N to hub channel, 0 = not behind the
-        // hub. Parsed into a scratch copy first, so a bad entry half way along
-        // cannot leave the staged map describing wiring that exists nowhere.
-        uint8_t scratch[GW_HUB_MAX_ROWS];
-        memset(scratch, 0, sizeof(scratch));
-        int row = 0;
-        const char* p = value;
-        while (*p && row < GW_HUB_MAX_ROWS) {
-            char* end = nullptr;
-            long ch = strtol(p, &end, 10);
-            if (end == p || ch < 0 || ch > GW_HUB_MAX_CH) {
-                snprintf(err, errN, "err=range key=%s allowed=0-%d_per_row",
-                         k.name, GW_HUB_MAX_CH);
-                return -1;
-            }
-            scratch[row++] = (uint8_t)ch;
-            p = end;
-            while (*p == ' ') p++;
-            if (*p == ',') { p++; while (*p == ' ') p++; }
-            else if (*p) {
-                snprintf(err, errN, "err=range key=%s allowed=comma_list", k.name);
-                return -1;
-            }
-        }
-        if (*p) {
-            snprintf(err, errN, "err=range key=%s allowed=max%drows",
-                     k.name, GW_HUB_MAX_ROWS);
-            return -1;
-        }
-        memcpy(_staged.hub_map, scratch, sizeof(_staged.hub_map));
-        return 0;
+        // "1,2,3,4,5,6,7,8,1,2" — row 1..N to hub channel, 0 = not behind
+        // the hub.
+        return parseRowList(value, _staged.hub_map, GW_HUB_MAX_ROWS,
+                            GW_HUB_MAX_CH, k.name, err, errN);
+    }
+
+    if (k.kind == KIND_SHAPE) {
+        // "8,8,8,4,4,4,4,8,8,8" — slots per row, 0 = the row is absent.
+        // All-zero is valid and means "follow panel.cabinet's preset".
+        return parseRowList(value, _staged.panel_shape, GW_SHAPE_ROWS,
+                            GW_SHAPE_MAX_COLS, k.name, err, errN);
     }
 
     uint32_t v = 0;
@@ -468,10 +514,28 @@ int gwConfig_validateStaged(char* detail, size_t n) {
     // The cabinet drives which slots a panel sweep walks, and 40/64/80 are
     // the shapes that exist — a number in between would light slots that do
     // not, which reads as a dead row rather than a typo.
-    // HHMM is a clock reading, not a number: 0790 is not a time.
-    if ((_staged.sched_reset_hhmm % 100) > 59) {
-        snprintf(detail, n, "sched.reset_hhmm=HHMM_minutes_0-59");
-        return -1;
+    // HHMM is a clock reading, not a number: 0790 is not a time. Every slot is
+    // checked, armed or not — a bad time sitting in a disarmed slot is a trap
+    // that springs the day somebody ticks it.
+    for (int s = 0; s < GW_SCHED_SLOTS; s++) {
+        if ((_staged.sched_reset_hhmm[s] % 100) > 59) {
+            snprintf(detail, n, "sched.reset_hhmm%s=HHMM_minutes_0-59",
+                     s ? (s == 1 ? "2" : (s == 2 ? "3" : "4")) : "");
+            return -1;
+        }
+    }
+    // The watchdog has to outlast the longest stall setup() can legitimately
+    // sit through, or the gateway resets itself while waiting for its own LAN
+    // and never finishes booting.
+    if (_staged.net_enabled) {
+        const uint32_t worstBoot = (uint32_t)_staged.net_link_timeout_ms
+                                 + (_staged.net_dhcp ? NET_DHCP_RESPONSE_MS : 0UL)
+                                 + 1000UL;
+        if (_staged.sys_wdt_ms < worstBoot) {
+            snprintf(detail, n, "sys.wdt_ms=needs_%lums_for_this_net_config",
+                     (unsigned long)worstBoot);
+            return -1;
+        }
     }
     if (_staged.panel_cabinet != 40 && _staged.panel_cabinet != 64 &&
         _staged.panel_cabinet != 80) {

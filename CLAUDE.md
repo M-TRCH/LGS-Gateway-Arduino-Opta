@@ -69,11 +69,11 @@ Function naming is module-prefixed: `tcpBridge_*`, `usbBridge_*`, `netRuntime_*`
 2. `gwStatus_begin()` — reset reason, boot counter, **OTP MAC read before any QSPI mount**
 3. button sample → recovery / erase
 4. `gwStore_begin()` → `gwConfig_begin()` (failure degrades to defaults, never fatal)
-5. **`usbBridge_begin()` + `gwConsole_begin()` — from here the bridge is live**
-6. `netRuntime_begin()` — optional; worst case costs `net.link_timeout_ms` of boot time
-7. `Watchdog.start(8000)`
+5. `gwStatus_watchdogBegin(sys.wdt_ms)` — **everything below is watchdog-covered**
+6. **`usbBridge_begin()` + `gwConsole_begin()` — from here the bridge is live**
+7. `netRuntime_begin()` — optional; worst case costs `net.link_timeout_ms` of boot time, and the watchdog is kicked immediately before it
 
-Anything new that can block or fail goes **after** step 5.
+Anything new that can block or fail goes **after** step 6.
 
 ## Runtime configuration
 
@@ -92,7 +92,7 @@ $LGS SAVE | DISCARD | DEFAULTS | REBOOT
 
 Every command answers with exactly one terminal `#OK ...` or `#ERR ...` line, optionally preceded by `#DATA` lines. Errors are machine-readable (`err=range key=… allowed=…`).
 
-Keys: `sys.name`, `rs485.*`, `usb.*`, `net.*` (`net.mac` read-only), `bus.hub_map|hub_retry|hub_gap_ms|hub_settle_ms|hub_budget_ms`, `panel.enabled|cabinet|btn1..btn5|step_ms|reset_ms|lamps|lamp_hold_ms|lamp_dwell_ms|lamp_dead|out1..out4`, `sched.reset_enabled|reset_hhmm|reset_days`. `sys.log` is a verb-level volatile toggle, deliberately **not** in `GwConfig`.
+Keys: `sys.name`, `sys.wdt_ms` (reboot-only), `rs485.*`, `usb.*`, `net.*` (`net.mac` read-only), `bus.hub_map|hub_retry|hub_gap_ms|hub_settle_ms|hub_budget_ms`, `panel.enabled|cabinet|shape|btn1..btn5|step_ms|reset_ms|lamps|lamp_hold_ms|lamp_dwell_ms|lamp_dead|out1..out4`, `sched.reset_enabled|reset_hhmm|reset_hhmm2|reset_hhmm3|reset_hhmm4|reset_slots|reset_days`. `sys.log` is a verb-level volatile toggle, deliberately **not** in `GwConfig`. `panel.shape` (slots per row, `8,8,4` style) overrides `panel.cabinet`'s preset for the button sweeps when non-zero — the escape hatch for a cabinet that is not a 40/64/80; both row-list keys share one parser (`parseRowList`/`formatRowList`).
 
 The key table is **append-only**: `valueOf()`/`storeValue()` switch on the index, so inserting a key silently rewrites the meaning of every key after it.
 
@@ -104,11 +104,13 @@ The key table is **append-only**: `valueOf()`/`storeValue()` switch on the index
 - **`Ethernet.begin()` is bounded, not infinite** — but its default timeout is 60 s, which looks like a hang. The 7-arg overload takes an explicit timeout; `net_runtime` passes `net.link_timeout_ms` (1500 ms). `begin()` starts the interface non-blocking and merely *polls* for the link, which is exactly why a cable plugged in later is picked up by `netRuntime_update()` without a reboot.
 - **`MbedServer::begin()` only allocates when its socket is null.** To move the listener to a new port you must `end()` first, or the re-bind silently fails.
 - **The stored blob's `schema` must be checked, and bumped when a field's MEANING changes** even if the struct size does not. It carried a schema field for months that nothing verified, and the day three bytes went from "which output is this colour on" to "what does this output follow", the old values were read straight back in and lit the wrong lamp. Size alone does not catch that.
+- **A schema or struct-size bump wipes the unit's settings** — the load reports `CORRUPT` and the board comes up on factory defaults, which means Ethernet **off** and no hub map. There is no migration path. Read the settings out (`$LGS GET`) before flashing a firmware whose `GwConfig` changed, and re-provision after: on the bench that is `net.enabled=1`, `net.ip`, `bus.hub_map`, `panel.enabled=1`. The Test Tool's `data/config.json` keeps the hub map and the address, which is the only reason the last one was recoverable.
+- **The watchdog must outlast the boot-time wait for an Ethernet link.** It now starts partway through `setup()` so it covers the network call, which means a period shorter than `net.link_timeout_ms` (+ the DHCP allowance) resets the board mid-boot, forever. `gwConfig_validateStaged()` refuses that combination; keep the check if either value moves. `NET_DHCP_RESPONSE_MS` lives in `config.h` for exactly this reason — a second copy in `net_runtime.cpp` would let the two drift.
 - **Anything that drives a relay must ask whether it is the shelf's power first.** The lamp test drives one output and clears the others; the lamps-off switch clears them all; the dwell rate-limits them. All three would cut the cabinet's power if they treated `SRC_SHELF` as a lamp, so each one skips it explicitly.
 - **The panel's sweeps must step from `loop()`, never block.** Eighty slots is several seconds of Modbus and the USB bridge, the TCP bridge and the watchdog all have to keep running through it.
 - **Nothing may be scheduled while the clock is unset.** The Opta's RTC has no battery, so a gateway that lost power believes it is January 1970 — and would fire its 03:00 reset the moment that fiction reached 03:00. `sched_update()` returns early unless `sched_setTime()` has been called since boot.
 - **The clock keeps wall time, not UTC**, and there is no timezone anywhere in the firmware. A tool setting it must send local seconds or every schedule is silently out by the offset.
-- **`INFO` values must not contain spaces.** The console's `key=value` lines are split on whitespace, so `time.now` is ISO with a `T`; a space truncated the value at the reader.
+- **`INFO` values must not contain spaces.** The console's `key=value` lines are split on whitespace, so `time.now` is ISO with a `T`; a space truncated the value at the reader. `sched.reset` broke this rule unnoticed for two versions — `"03:00 daily"` arrived as `03:00` — which is why it now reads `03:00,15:00@Mon,Wed` and says `waiting_for_clock` rather than "waiting for the time".
 - **The RS485 hub needs ~2 s of silence to change channel** (measured; see `modbus_rtu.cpp`). Repairing by retrying inside one transaction cannot work — the fix is to hold the next request in silence until the channel opens, and `bus.hub_budget_ms` must stay under the master's timeout or the bridge desynchronises.
 - **Never use `kv_set`/`kv_get` on the Opta.** The default KVStore config claims the whole 16 MB QSPI over the MBR, WiFi firmware and OTA slots. Use `TDBStore` on `MBRBlockDevice(..., 3)` as `gw_store` does.
 - **QSPI provisioning is a one-time manual step.** A board whose QSPI was never partitioned reports `cfg.store=unavailable`; fix it with Arduino's `QSPIFormat.ino` (partitions become WiFi 1 MB / OTA 5 MB / KVStore 1 MB / user data 7 MB). That sketch prints its banner before a late-attaching host sees it and then blocks silently, so send the first `Y` blind — and note `waitResponse()` accepts any stray y/n byte, so a command containing "N" answers "no" for you.

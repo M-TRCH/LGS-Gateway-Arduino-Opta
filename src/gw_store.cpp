@@ -14,7 +14,9 @@
 // v3: the scheduler's three fields were appended.
 // v4: panel_out grew from 3 outputs to 4 — output 1 (the shelf's power)
 // joined the same mapping, so every stored index shifted by one.
-#define GW_BLOB_SCHEMA  4
+// v5: the schedule became four slots and the watchdog period became config.
+// v6: panel_shape was appended — the sweep shape for a non-catalogue cabinet.
+#define GW_BLOB_SCHEMA  6
 #define GW_KVSTORE_PARTITION 3
 #define GW_KEY          "gwcfg"
 

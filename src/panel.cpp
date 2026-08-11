@@ -12,6 +12,9 @@ static const pin_size_t PANEL_PIN[PANEL_BUTTONS] = { A0, A1, A2, A3, A4 };
 static uint8_t  _action[PANEL_BUTTONS] = {0};
 static uint8_t  _enabled = 0;
 static uint16_t _cabinet = PANEL_CABINET_64;
+// Slots per row, all-zero = follow _cabinet's preset. This is the cabinet
+// that is not in the catalogue: the sweep walks whatever is really there.
+static uint8_t  _shape[GW_SHAPE_ROWS] = {0};
 static uint16_t _stepMs = 0;
 static uint16_t _resetMs = 0;
 
@@ -89,6 +92,31 @@ uint8_t panel_slotAt(uint16_t cabinet, uint16_t index) {
     return (uint8_t)(((index / 8) + 1) * 10 + (index % 8) + 1);
 }
 
+// The shape the sweeps actually walk: the custom shape when one is set,
+// else the preset. Top row first, left to right, absent rows skipped.
+static bool shapeSet() {
+    for (int r = 0; r < GW_SHAPE_ROWS; r++) {
+        if (_shape[r]) return true;
+    }
+    return false;
+}
+
+uint16_t panel_activeSlotCount() {
+    if (!shapeSet()) return panel_slotCount(_cabinet);
+    uint16_t n = 0;
+    for (int r = 0; r < GW_SHAPE_ROWS; r++) n += _shape[r];
+    return n;
+}
+
+uint8_t panel_activeSlotAt(uint16_t index) {
+    if (!shapeSet()) return panel_slotAt(_cabinet, index);
+    for (int r = 0; r < GW_SHAPE_ROWS; r++) {
+        if (index < _shape[r]) return (uint8_t)((r + 1) * 10 + index + 1);
+        index -= _shape[r];
+    }
+    return 0;
+}
+
 // ── Modbus helpers ─────────────────────────────────────────────────────────
 static void writeCoil(uint8_t slave, uint16_t coil, bool on) {
     uint8_t tx[8];
@@ -130,7 +158,7 @@ static uint16_t displayValue(uint8_t slave) {
 static void startSweep(uint8_t action) {
     _running = action;
     _index = 0;
-    _total = (action == PANEL_RESET) ? 0 : panel_slotCount(_cabinet);
+    _total = (action == PANEL_RESET) ? 0 : panel_activeSlotCount();
     _nextStepAt = millis();
     if (action == PANEL_RESET) {
         // Only the deadline is set here; whichever output is mapped to the
@@ -144,7 +172,7 @@ static void startSweep(uint8_t action) {
 void panel_startReset() { startSweep(PANEL_RESET); }
 
 static void stepSweep() {
-    const uint8_t slave = panel_slotAt(_cabinet, _index);
+    const uint8_t slave = panel_activeSlotAt(_index);
     if (slave == 0) { _running = PANEL_NONE; _total = 0; return; }
 
     switch (_running) {
@@ -175,6 +203,7 @@ void panel_applyConfig() {
     const GwConfig& c = gwConfig_active();
     _enabled = c.panel_enabled;
     _cabinet = c.panel_cabinet;
+    memcpy(_shape, c.panel_shape, sizeof(_shape));
     _stepMs = c.panel_step_ms;
     _resetMs = c.panel_reset_ms;
     _lampHoldMs = c.panel_lamp_hold_ms;
@@ -338,7 +367,7 @@ const char* panel_lampName() {
     for (uint8_t i = 0; i < PANEL_OUTPUTS; i++) {
         buf[i] = _outLit[i] ? (char)('1' + i) : '-';
     }
-    buf[PANEL_OUTPUTS] = ' ';
+    buf[PANEL_OUTPUTS] = '\0';
     if (_forceOut != 0xFF) {
         static char forced[16];
         snprintf(forced, sizeof(forced), "forced:%s", buf);

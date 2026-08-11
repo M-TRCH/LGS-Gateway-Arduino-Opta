@@ -50,7 +50,10 @@ static const KeyDef KEYS[] = {
     { "panel.btn3",           KIND_U16,  0, 4,          false },
     { "panel.btn4",           KIND_U16,  0, 4,          false },
     { "panel.btn5",           KIND_U16,  0, 4,          false },
-    { "panel.step_ms",        KIND_U16,  0, 2000,       false },
+    // Index 29 was the single panel.step_ms; the name changed with the
+    // meaning (all_on's pace) — schema 9 covers the store, and a tool that
+    // still says step_ms gets unknown_key rather than a silent half-truth.
+    { "panel.step_on_ms",     KIND_U16,  0, 2000,       false },
     { "panel.reset_ms",       KIND_U16,  200, 10000,    false },
     { "panel.lamps",          KIND_BOOL, 0, 1,          false },
     { "panel.lamp_hold_ms",   KIND_U16,  100, 5000,     false },
@@ -72,6 +75,8 @@ static const KeyDef KEYS[] = {
     { "panel.shape",          KIND_SHAPE, 0, 0,         false },
     { "panel.preset",         KIND_U16,  1, 8,          false },
     { "panel.bright",         KIND_U16,  0, 100,        false },
+    { "panel.step_off_ms",    KIND_U16,  0, 2000,       false },
+    { "panel.step_unlock_ms", KIND_U16,  0, 2000,       false },
 };
 static const int KEY_N = (int)(sizeof(KEYS) / sizeof(KEYS[0]));
 
@@ -117,7 +122,9 @@ static void defaults(GwConfig& c) {
     c.panel_btn[2]         = 3;    // blue   -> all_unlock
     c.panel_btn[3]         = 0;    // yellow -> unassigned
     c.panel_btn[4]         = 4;    // white  -> reset
-    c.panel_step_ms        = DEF_PANEL_STEP_MS;
+    c.panel_step_on_ms     = DEF_PANEL_STEP_MS;
+    c.panel_step_off_ms    = DEF_PANEL_STEP_MS;
+    c.panel_step_unlock_ms = DEF_PANEL_STEP_MS;
     c.panel_reset_ms       = DEF_PANEL_RESET_MS;
     c.panel_lamps          = DEF_PANEL_LAMPS;
     c.panel_lamp_hold_ms   = DEF_PANEL_LAMP_HOLD_MS;
@@ -249,7 +256,7 @@ static uint32_t valueOf(const GwConfig& c, int i) {
         case 26: return c.panel_btn[2];
         case 27: return c.panel_btn[3];
         case 28: return c.panel_btn[4];
-        case 29: return c.panel_step_ms;
+        case 29: return c.panel_step_on_ms;
         case 30: return c.panel_reset_ms;
         case 31: return c.panel_lamps;
         case 32: return c.panel_lamp_hold_ms;
@@ -269,6 +276,8 @@ static uint32_t valueOf(const GwConfig& c, int i) {
         case 46: return c.sys_wdt_ms;
         case 48: return c.panel_preset;
         case 49: return c.panel_bright;
+        case 50: return c.panel_step_off_ms;
+        case 51: return c.panel_step_unlock_ms;
         default: return 0;
     }
 }
@@ -301,7 +310,7 @@ static void storeValue(GwConfig& c, int i, uint32_t v) {
         case 26: c.panel_btn[2]        = (uint8_t)v; break;
         case 27: c.panel_btn[3]        = (uint8_t)v; break;
         case 28: c.panel_btn[4]        = (uint8_t)v; break;
-        case 29: c.panel_step_ms       = (uint16_t)v; break;
+        case 29: c.panel_step_on_ms    = (uint16_t)v; break;
         case 30: c.panel_reset_ms      = (uint16_t)v; break;
         case 31: c.panel_lamps         = (uint8_t)v; break;
         case 32: c.panel_lamp_hold_ms  = (uint16_t)v; break;
@@ -321,6 +330,8 @@ static void storeValue(GwConfig& c, int i, uint32_t v) {
         case 46: c.sys_wdt_ms          = (uint16_t)v; break;
         case 48: c.panel_preset        = (uint8_t)v; break;
         case 49: c.panel_bright        = (uint8_t)v; break;
+        case 50: c.panel_step_off_ms   = (uint16_t)v; break;
+        case 51: c.panel_step_unlock_ms = (uint16_t)v; break;
         default: break;
     }
 }

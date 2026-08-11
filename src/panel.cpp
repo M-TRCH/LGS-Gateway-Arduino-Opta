@@ -15,7 +15,12 @@ static uint16_t _cabinet = PANEL_CABINET_64;
 // Slots per row, all-zero = follow _cabinet's preset. This is the cabinet
 // that is not in the catalogue: the sweep walks whatever is really there.
 static uint8_t  _shape[GW_SHAPE_ROWS] = {0};
-static uint16_t _stepMs = 0;
+// Pacing per sweep kind. The unlock pause is really a power budget: it
+// spaces the solenoid firings out so a whole-cabinet unlock cannot ask the
+// supply for many latches at once.
+static uint16_t _stepOnMs = 0;
+static uint16_t _stepOffMs = 0;
+static uint16_t _stepUnlockMs = 0;
 static uint16_t _resetMs = 0;
 // Which module preset the sweeps fire. Brightness and colour live in the
 // preset's per-module config — the panel picks the look, it does not own it.
@@ -205,7 +210,10 @@ static void stepSweep() {
     }
     _index++;
     if (_index >= _total) { _running = PANEL_NONE; _total = 0; }
-    _nextStepAt = millis() + _stepMs;
+    const uint16_t pace = (_running == PANEL_ALL_UNLOCK) ? _stepUnlockMs
+                        : (_running == PANEL_ALL_OFF)    ? _stepOffMs
+                        : _stepOnMs;
+    _nextStepAt = millis() + pace;
 }
 
 // ── Lifecycle ──────────────────────────────────────────────────────────────
@@ -217,7 +225,9 @@ void panel_applyConfig() {
     _preset = (c.panel_preset >= 1 && c.panel_preset <= 8)
               ? c.panel_preset : DEF_PANEL_PRESET;
     _bright = c.panel_bright <= 100 ? c.panel_bright : DEF_PANEL_BRIGHT;
-    _stepMs = c.panel_step_ms;
+    _stepOnMs = c.panel_step_on_ms;
+    _stepOffMs = c.panel_step_off_ms;
+    _stepUnlockMs = c.panel_step_unlock_ms;
     _resetMs = c.panel_reset_ms;
     _lampHoldMs = c.panel_lamp_hold_ms;
     _lampDwellMs = c.panel_lamp_dwell_ms;

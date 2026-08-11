@@ -18,7 +18,8 @@
 // v6: panel_shape was appended — the sweep shape for a non-catalogue cabinet.
 // v7: panel_preset was inserted — which module preset the sweeps fire.
 // v8: panel_bright was inserted — the sweeps' temporary test brightness.
-#define GW_BLOB_SCHEMA  8
+// v9: panel_step_ms became three paces, one per sweep kind (on/off/unlock).
+#define GW_BLOB_SCHEMA  9
 #define GW_KVSTORE_PARTITION 3
 #define GW_KEY          "gwcfg"
 

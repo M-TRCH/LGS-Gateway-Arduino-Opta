@@ -71,7 +71,12 @@ struct GwConfig {
     uint8_t  panel_enabled;
     uint8_t  panel_btn[5];              // inputs 1-5 -> PanelAction
     uint16_t panel_cabinet;             // 40 / 64 / 80, the sweep's slot list
-    uint16_t panel_step_ms;             // pacing between slots in a sweep
+    // Pacing between slots, one per sweep kind: lighting can walk slowly
+    // for show, clearing can be instant, and the unlock sweep's pause is
+    // really a power budget — it spaces the solenoid firings out.
+    uint16_t panel_step_on_ms;          // all_on
+    uint16_t panel_step_off_ms;         // all_off
+    uint16_t panel_step_unlock_ms;      // all_unlock
     uint16_t panel_reset_ms;            // how long the relays stay dropped
     // Which module preset the sweeps fire (1-8). The preset carries the
     // brightness and colour per module, so the panel's look is tuned there.

@@ -17,7 +17,8 @@
 // v5: the schedule became four slots and the watchdog period became config.
 // v6: panel_shape was appended — the sweep shape for a non-catalogue cabinet.
 // v7: panel_preset was inserted — which module preset the sweeps fire.
-#define GW_BLOB_SCHEMA  7
+// v8: panel_bright was inserted — the sweeps' temporary test brightness.
+#define GW_BLOB_SCHEMA  8
 #define GW_KVSTORE_PARTITION 3
 #define GW_KEY          "gwcfg"
 

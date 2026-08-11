@@ -140,6 +140,11 @@ extern bool g_logEnabled;
 // and colour live in that preset's per-module config, so "the panel is too
 // bright" is answered by pointing the panel at a dimmer preset.
 #define DEF_PANEL_PRESET     1
+// Temporary test brightness for the light sweeps: 0 leaves each module's
+// own preset brightness alone; 1-100 writes the module's VOLATILE global
+// brightness (reg 190) before lighting it — modules forget it at power-off,
+// so a test cannot silently rewrite a site's configured look.
+#define DEF_PANEL_BRIGHT     0
 
 // ── Factory defaults: clock and scheduler ──────────────────────────────────
 // Off by default. A cabinet that power-cycles itself at an hour nobody chose

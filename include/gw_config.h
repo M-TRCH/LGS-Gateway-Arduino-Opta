@@ -76,6 +76,9 @@ struct GwConfig {
     // Which module preset the sweeps fire (1-8). The preset carries the
     // brightness and colour per module, so the panel's look is tuned there.
     uint8_t  panel_preset;
+    // Test brightness for the light sweeps: 0 = the preset's own, 1-100 =
+    // write each module's volatile global brightness (reg 190) first.
+    uint8_t  panel_bright;
     // Status lamps. What each output follows is mapped below; these decide
     // when the underlying state changes — how busy a bus has to look before
     // it counts as busy, and how dead before it counts as a fault.

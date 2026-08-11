@@ -37,6 +37,8 @@ Which slots a sweep walks comes from `panel.cabinet` (40, 64 or 80 — the catal
 
 How a lit slot *looks* — brightness and colour — is **`panel.preset`** (1–8, default 1): the sweeps fire that preset's coils (`1010+p` ring + display, `1030+p` plus the latch), and the preset's brightness and colour are per-module configuration. A panel that is too bright at night is fixed by pointing it at a dimmer preset, not by a firmware change. `panel.step_ms` paces the walk per slot.
 
+For a quick test there is also **`panel.bright`** (0–100, default 0 = off): when set, the sweep writes each module's *volatile* global brightness (reg 190) before lighting it — the whole cabinet lights at that brightness for the test, and a power cycle restores the configured look because nothing was stored. One extra write per slot while set.
+
 ### Relay outputs (1–4)
 
 Each output follows one source. Ready, busy and fault are three faces of one state, so mapping those to three outputs gives a traffic light — exactly one lit, worst news first.

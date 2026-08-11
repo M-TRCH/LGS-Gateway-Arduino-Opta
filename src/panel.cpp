@@ -20,6 +20,10 @@ static uint16_t _resetMs = 0;
 // Which module preset the sweeps fire. Brightness and colour live in the
 // preset's per-module config — the panel picks the look, it does not own it.
 static uint8_t  _preset = DEF_PANEL_PRESET;
+// Test brightness: 0 = the preset's own; else the module's VOLATILE global
+// brightness (reg 190) is written before lighting, so a test look cannot
+// outlive a power cycle or rewrite anything a site configured.
+static uint8_t  _bright = DEF_PANEL_BRIGHT;
 
 // Idle level per input, sampled at boot. The buttons may be wired to apply
 // voltage or to remove it, and a gateway that has to be told which is a
@@ -184,10 +188,12 @@ static void stepSweep() {
     const uint16_t coilDisplay = (uint16_t)(1010 + _preset);
     switch (_running) {
         case PANEL_ALL_ON:
+            if (_bright) writeReg(slave, 190, _bright);
             writeReg(slave, 60, displayValue(slave));
             writeCoil(slave, coilDisplay, true);
             break;
         case PANEL_ALL_UNLOCK:
+            if (_bright) writeReg(slave, 190, _bright);
             writeReg(slave, 60, displayValue(slave));
             writeCoil(slave, (uint16_t)(1030 + _preset), true);
             break;
@@ -210,6 +216,7 @@ void panel_applyConfig() {
     memcpy(_shape, c.panel_shape, sizeof(_shape));
     _preset = (c.panel_preset >= 1 && c.panel_preset <= 8)
               ? c.panel_preset : DEF_PANEL_PRESET;
+    _bright = c.panel_bright <= 100 ? c.panel_bright : DEF_PANEL_BRIGHT;
     _stepMs = c.panel_step_ms;
     _resetMs = c.panel_reset_ms;
     _lampHoldMs = c.panel_lamp_hold_ms;

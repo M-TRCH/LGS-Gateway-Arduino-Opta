@@ -70,6 +70,7 @@ static const KeyDef KEYS[] = {
     // Reboot-only: the IWDG cannot be reconfigured once it is running.
     { "sys.wdt_ms",           KIND_U16,  MIN_WATCHDOG_MS, MAX_WATCHDOG_MS, true },
     { "panel.shape",          KIND_SHAPE, 0, 0,         false },
+    { "panel.preset",         KIND_U16,  1, 8,          false },
 };
 static const int KEY_N = (int)(sizeof(KEYS) / sizeof(KEYS[0]));
 
@@ -125,6 +126,7 @@ static void defaults(GwConfig& c) {
     c.panel_out[1]         = DEF_PANEL_OUT2;
     c.panel_out[2]         = DEF_PANEL_OUT3;
     c.panel_out[3]         = DEF_PANEL_OUT4;
+    c.panel_preset         = DEF_PANEL_PRESET;
     c.sched_reset_enabled  = DEF_SCHED_RESET_ENABLED;
     c.sched_reset_hhmm[0]  = DEF_SCHED_RESET_HHMM;
     c.sched_reset_hhmm[1]  = DEF_SCHED_RESET_HHMM2;
@@ -263,6 +265,7 @@ static uint32_t valueOf(const GwConfig& c, int i) {
         case 44: return c.sched_reset_hhmm[3];
         case 45: return c.sched_reset_slots;
         case 46: return c.sys_wdt_ms;
+        case 48: return c.panel_preset;
         default: return 0;
     }
 }
@@ -313,6 +316,7 @@ static void storeValue(GwConfig& c, int i, uint32_t v) {
         case 44: c.sched_reset_hhmm[3] = (uint16_t)v; break;
         case 45: c.sched_reset_slots   = (uint8_t)v; break;
         case 46: c.sys_wdt_ms          = (uint16_t)v; break;
+        case 48: c.panel_preset        = (uint8_t)v; break;
         default: break;
     }
 }

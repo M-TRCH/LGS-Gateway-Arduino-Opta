@@ -73,6 +73,9 @@ struct GwConfig {
     uint16_t panel_cabinet;             // 40 / 64 / 80, the sweep's slot list
     uint16_t panel_step_ms;             // pacing between slots in a sweep
     uint16_t panel_reset_ms;            // how long the relays stay dropped
+    // Which module preset the sweeps fire (1-8). The preset carries the
+    // brightness and colour per module, so the panel's look is tuned there.
+    uint8_t  panel_preset;
     // Status lamps. What each output follows is mapped below; these decide
     // when the underlying state changes — how busy a bus has to look before
     // it counts as busy, and how dead before it counts as a fault.

@@ -17,6 +17,9 @@ static uint16_t _cabinet = PANEL_CABINET_64;
 static uint8_t  _shape[GW_SHAPE_ROWS] = {0};
 static uint16_t _stepMs = 0;
 static uint16_t _resetMs = 0;
+// Which module preset the sweeps fire. Brightness and colour live in the
+// preset's per-module config — the panel picks the look, it does not own it.
+static uint8_t  _preset = DEF_PANEL_PRESET;
 
 // Idle level per input, sampled at boot. The buttons may be wired to apply
 // voltage or to remove it, and a gateway that has to be told which is a
@@ -175,20 +178,21 @@ static void stepSweep() {
     const uint8_t slave = panel_activeSlotAt(_index);
     if (slave == 0) { _running = PANEL_NONE; _total = 0; return; }
 
+    // Coils 1010+p (ring + display) and 1030+p (plus the latch) for the
+    // configured preset. The latch coil mirrors the display coil of the SAME
+    // preset, so all_off clearing 1010+p also puts out what a blue press lit.
+    const uint16_t coilDisplay = (uint16_t)(1010 + _preset);
     switch (_running) {
         case PANEL_ALL_ON:
             writeReg(slave, 60, displayValue(slave));
-            writeCoil(slave, 1011, true);
+            writeCoil(slave, coilDisplay, true);
             break;
         case PANEL_ALL_UNLOCK:
             writeReg(slave, 60, displayValue(slave));
-            writeCoil(slave, 1031, true);
+            writeCoil(slave, (uint16_t)(1030 + _preset), true);
             break;
         case PANEL_ALL_OFF:
-            // 1011 is the state coil for ring + display, and clearing it
-            // clears both — the same one the latch commands mirror, so this
-            // also puts out whatever a blue press left lit.
-            writeCoil(slave, 1011, false);
+            writeCoil(slave, coilDisplay, false);
             break;
         default:
             break;
@@ -204,6 +208,8 @@ void panel_applyConfig() {
     _enabled = c.panel_enabled;
     _cabinet = c.panel_cabinet;
     memcpy(_shape, c.panel_shape, sizeof(_shape));
+    _preset = (c.panel_preset >= 1 && c.panel_preset <= 8)
+              ? c.panel_preset : DEF_PANEL_PRESET;
     _stepMs = c.panel_step_ms;
     _resetMs = c.panel_reset_ms;
     _lampHoldMs = c.panel_lamp_hold_ms;

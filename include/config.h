@@ -136,6 +136,10 @@ extern bool g_logEnabled;
 #define DEF_PANEL_OUT2       1      // SRC_READY
 #define DEF_PANEL_OUT3       2      // SRC_BUSY
 #define DEF_PANEL_OUT4       3      // SRC_FAULT
+// Which module preset the sweeps light (coils 1010+p / 1030+p). Brightness
+// and colour live in that preset's per-module config, so "the panel is too
+// bright" is answered by pointing the panel at a dimmer preset.
+#define DEF_PANEL_PRESET     1
 
 // ── Factory defaults: clock and scheduler ──────────────────────────────────
 // Off by default. A cabinet that power-cycles itself at an hour nobody chose

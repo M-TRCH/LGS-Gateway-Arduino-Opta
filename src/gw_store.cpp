@@ -16,7 +16,8 @@
 // joined the same mapping, so every stored index shifted by one.
 // v5: the schedule became four slots and the watchdog period became config.
 // v6: panel_shape was appended — the sweep shape for a non-catalogue cabinet.
-#define GW_BLOB_SCHEMA  6
+// v7: panel_preset was inserted — which module preset the sweeps fire.
+#define GW_BLOB_SCHEMA  7
 #define GW_KVSTORE_PARTITION 3
 #define GW_KEY          "gwcfg"
 

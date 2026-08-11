@@ -35,6 +35,8 @@ Defaults follow the cabinet as built: red = all_on, green = all_off, blue = all_
 
 Which slots a sweep walks comes from `panel.cabinet` (40, 64 or 80 — the catalogue shapes, hard-coded). A cabinet that is none of those sets **`panel.shape`** instead: slots per row from the top, `8,8,8,4,4,4,4,8,8,8` style, up to ten rows of 0–8. When the shape is non-zero it overrides the preset; `0` clears it. The Test Tool's header cabinet picker keeps both in step and warns when they disagree.
 
+How a lit slot *looks* — brightness and colour — is **`panel.preset`** (1–8, default 1): the sweeps fire that preset's coils (`1010+p` ring + display, `1030+p` plus the latch), and the preset's brightness and colour are per-module configuration. A panel that is too bright at night is fixed by pointing it at a dimmer preset, not by a firmware change. `panel.step_ms` paces the walk per slot.
+
 ### Relay outputs (1–4)
 
 Each output follows one source. Ready, busy and fault are three faces of one state, so mapping those to three outputs gives a traffic light — exactly one lit, worst news first.

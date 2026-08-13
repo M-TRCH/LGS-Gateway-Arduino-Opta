@@ -24,7 +24,10 @@ enum PanelAction : uint8_t {
     PANEL_ALL_OFF    = 2,   // everything out
     PANEL_ALL_UNLOCK = 3,   // ring + number + latch, slot by slot
     PANEL_RESET      = 4,   // drop both relays: a power cycle of the shelf
-    PANEL_ACTION_MAX = 4,
+    PANEL_LAMP_TEST  = 5,   // light the status lamps one by one (the shelf's
+                            // output is never touched); the yellow button's
+                            // default job — check the lamps with no PC
+    PANEL_ACTION_MAX = 5,
 };
 
 // Slot count of the cabinet a sweep walks. Anything else is treated as 80.

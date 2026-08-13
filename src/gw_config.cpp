@@ -49,11 +49,11 @@ static const KeyDef KEYS[] = {
     { "bus.hub_settle_ms",    KIND_U16,  200, 5000,     false },
     { "panel.enabled",        KIND_BOOL, 0, 1,          false },
     { "panel.cabinet",        KIND_U16,  40, 80,        false },
-    { "panel.btn1",           KIND_U16,  0, 4,          false },
-    { "panel.btn2",           KIND_U16,  0, 4,          false },
-    { "panel.btn3",           KIND_U16,  0, 4,          false },
-    { "panel.btn4",           KIND_U16,  0, 4,          false },
-    { "panel.btn5",           KIND_U16,  0, 4,          false },
+    { "panel.btn1",           KIND_U16,  0, 5,          false },
+    { "panel.btn2",           KIND_U16,  0, 5,          false },
+    { "panel.btn3",           KIND_U16,  0, 5,          false },
+    { "panel.btn4",           KIND_U16,  0, 5,          false },
+    { "panel.btn5",           KIND_U16,  0, 5,          false },
     // Index 29 was the single panel.step_ms; the name changed with the
     // meaning (all_on's pace) — schema 9 covers the store, and a tool that
     // still says step_ms gets unknown_key rather than a silent half-truth.
@@ -124,14 +124,13 @@ static void defaults(GwConfig& c) {
     c.hub_gap_ms           = DEF_HUB_GAP_MS;
     c.hub_budget_ms        = DEF_HUB_BUDGET_MS;
     // Panel buttons: red lights the cabinet, green clears it, blue adds the
-    // latch, white power-cycles it. Yellow is left unassigned until a site
-    // says what it is for.
+    // latch, yellow tests the status lamps, white power-cycles the shelf.
     c.panel_enabled        = DEF_PANEL_ENABLED;
     c.panel_cabinet        = DEF_PANEL_CABINET;
     c.panel_btn[0]         = 1;    // red    -> all_on
     c.panel_btn[1]         = 2;    // green  -> all_off
     c.panel_btn[2]         = 3;    // blue   -> all_unlock
-    c.panel_btn[3]         = 0;    // yellow -> unassigned
+    c.panel_btn[3]         = 5;    // yellow -> lamp test (the site's call, 2026-08-13)
     c.panel_btn[4]         = 4;    // white  -> reset
     c.panel_step_on_ms     = DEF_PANEL_STEP_MS;
     c.panel_step_off_ms    = DEF_PANEL_STEP_MS;

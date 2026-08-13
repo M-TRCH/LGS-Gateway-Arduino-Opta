@@ -81,6 +81,10 @@ extern bool g_logEnabled;
 #define NTP_RESYNC_MS           86400000UL // synced: re-check daily
 #define NTP_LOCAL_PORT          50123   // our end of the UDP conversation
 
+// Lamp test (panel action 5, the yellow button's default): how long each
+// status lamp stays lit before the next takes over.
+#define PANEL_LAMPTEST_STEP_MS  1000UL
+
 // ── Modbus TCP framing ─────────────────────────────────────────────────────
 // The listening port itself is runtime config (net.port), not a constant.
 #define TCP_BUF_SIZE        256

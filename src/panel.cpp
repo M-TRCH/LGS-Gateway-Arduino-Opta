@@ -63,6 +63,11 @@ static void outWrite(uint8_t i, bool on);  // defined with the lamp logic
 static uint8_t  _forceOut = 0xFF;       // 0xFF = outputs follow their mapping
 static uint32_t _forceUntil = 0;
 
+// Lamp test (the yellow button): outputs 1-4 in turn, riding the same force
+// machinery a console wiring check uses. 0 = idle, else the NEXT output.
+static uint8_t  _lampTestStep = 0;
+static uint32_t _lampTestNextAt = 0;
+
 // Index 0..3 -> outputs 1..4 on the terminal block.
 static int outPin(uint8_t i) {
     switch (i) {
@@ -183,6 +188,15 @@ static void startSweep(uint8_t action) {
 }
 
 void panel_startReset() { startSweep(PANEL_RESET); }
+
+// The yellow button's job: light each status lamp for a second so the lamps
+// can be checked at the cabinet with no PC. panel_forceLamp itself refuses
+// to touch an output carrying the shelf's power, so this can never cut the
+// cabinet no matter how the outputs are mapped.
+static void startLampTest() {
+    _lampTestStep = 1;
+    _lampTestNextAt = millis();
+}
 
 static void stepSweep() {
     const uint8_t slave = panel_activeSlotAt(_index);
@@ -347,7 +361,8 @@ void panel_update() {
             if (level != _idleLevel[i] && _action[i] != PANEL_NONE) {
                 // Manual actions only — a scheduled reset logs its own event.
                 eventLog_note(GW_EV_SWEEP, _action[i], (uint16_t)(i + 1));
-                startSweep(_action[i]);
+                if (_action[i] == PANEL_LAMP_TEST) startLampTest();
+                else                               startSweep(_action[i]);
             }
         }
     }
@@ -355,6 +370,24 @@ void panel_update() {
     // One slot per tick at most, so the bridges keep their share of the loop.
     if (_running != PANEL_NONE && _running != PANEL_RESET && now >= _nextStepAt) {
         stepSweep();
+    }
+
+    // Lamp test: advance to the next output each second. Shelf-carrying
+    // outputs are skipped here AND refused by panel_forceLamp — belt and
+    // braces around the one output that must never blink.
+    if (_lampTestStep && now >= _lampTestNextAt) {
+        uint8_t out = 0;
+        while (_lampTestStep <= PANEL_OUTPUTS) {
+            const uint8_t idx = (uint8_t)(_lampTestStep - 1);
+            _lampTestStep++;
+            if (!isShelf(idx)) { out = (uint8_t)(idx + 1); break; }
+        }
+        if (out) {
+            panel_forceLamp(out, PANEL_LAMPTEST_STEP_MS);
+            _lampTestNextAt = now + PANEL_LAMPTEST_STEP_MS;
+        } else {
+            _lampTestStep = 0;      // done; the last force expires on its own
+        }
     }
 
     // The lamps report the gateway, not the buttons, so they run even when
@@ -408,6 +441,7 @@ const char* panel_actionName(uint8_t action) {
         case PANEL_ALL_OFF:    return "all_off";
         case PANEL_ALL_UNLOCK: return "all_unlock";
         case PANEL_RESET:      return "reset";
+        case PANEL_LAMP_TEST:  return "lamp_test";
         default:               return "none";
     }
 }

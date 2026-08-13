@@ -76,6 +76,23 @@ static void latchResetReason() {
     else if (__HAL_RCC_GET_FLAG(RCC_FLAG_BORRST))   { _resetReason = "brownout";        _resetCode = 5; }
     else if (__HAL_RCC_GET_FLAG(RCC_FLAG_PORRST))   { _resetReason = "power-on";        _resetCode = 6; }
     __HAL_RCC_CLEAR_RESET_FLAGS();
+
+    // On the Opta the RCC flags are ALREADY CLEARED by the time the app
+    // runs: the factory bootloader reads them first and parks its verdict —
+    // an mbed reset_reason_t — in RTC backup DR8. Measured on the bench:
+    // every path above missed, and the log's boot events all said 0. So
+    // DR8 is the real source here; the flags stay as a first try in case a
+    // bootloader change ever hands them back.
+    if (_resetCode == 0) {
+        switch (HAL_RTCEx_BKUPRead(&RTCHandle, RTC_BKP_DR8)) {
+            case 0:  _resetReason = "power-on"; _resetCode = 6; break;
+            case 1:  _resetReason = "pin";      _resetCode = 4; break;
+            case 2:  _resetReason = "brownout"; _resetCode = 5; break;
+            case 3:  _resetReason = "software"; _resetCode = 3; break;
+            case 4:  _resetReason = "watchdog"; _resetCode = 1; break;
+            default: break;                     // lockup/multiple/unknown
+        }
+    }
 }
 
 void gwStatus_begin() {

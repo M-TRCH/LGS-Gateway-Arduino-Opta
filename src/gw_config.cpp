@@ -1,4 +1,5 @@
 #include "gw_config.h"
+#include "event_log.h"
 #include "panel.h"
 #include "sched.h"
 
@@ -6,11 +7,14 @@
 #include "gw_store.h"
 #include "modbus_rtu.h"
 #include "net_runtime.h"
+#include "ntp.h"
 #include "usb_bridge.h"
 
 // ── Key table ──────────────────────────────────────────────────────────────
+// KIND_I16 is hard-wired to time_tz_min the way KIND_STR is to sys_name —
+// there is exactly one signed key, and lo/hi are unsigned.
 enum GwKind : uint8_t { KIND_STR, KIND_BOOL, KIND_U16, KIND_U32, KIND_IP, KIND_MAC_RO,
-                        KIND_HUBMAP, KIND_SHAPE };
+                        KIND_HUBMAP, KIND_SHAPE, KIND_I16 };
 
 struct KeyDef {
     const char* name;
@@ -77,6 +81,10 @@ static const KeyDef KEYS[] = {
     { "panel.bright",         KIND_U16,  0, 100,        false },
     { "panel.step_off_ms",    KIND_U16,  0, 2000,       false },
     { "panel.step_unlock_ms", KIND_U16,  0, 2000,       false },
+    // NTP is live (no reboot): a save kicks a fresh sync attempt directly.
+    { "net.ntp",              KIND_IP,   0, 0,          false },
+    { "net.ntp_port",         KIND_U16,  1, 65535,      false },
+    { "time.tz_min",          KIND_I16,  0, 0,          false },
 };
 static const int KEY_N = (int)(sizeof(KEYS) / sizeof(KEYS[0]));
 
@@ -104,6 +112,9 @@ static void defaults(GwConfig& c) {
     c.net_dns              = DEF_NET_DNS;
     c.net_port             = DEF_NET_PORT;
     c.net_link_timeout_ms  = DEF_NET_LINK_TIMEOUT_MS;
+    c.net_ntp              = DEF_NET_NTP;
+    c.net_ntp_port         = DEF_NET_NTP_PORT;
+    c.time_tz_min          = DEF_TIME_TZ_MIN;
     // No hub by default: an all-zero map makes every row channel 0, so
     // nothing ever counts as a channel change and a gateway wired
     // straight to the bus behaves exactly as it did before this existed.
@@ -278,6 +289,11 @@ static uint32_t valueOf(const GwConfig& c, int i) {
         case 49: return c.panel_bright;
         case 50: return c.panel_step_off_ms;
         case 51: return c.panel_step_unlock_ms;
+        case 52: return c.net_ntp;
+        case 53: return c.net_ntp_port;
+        // Bit pattern, for gwConfig_differs(); rendering goes through the
+        // signed KIND_I16 case in gwConfig_format().
+        case 54: return (uint32_t)(uint16_t)c.time_tz_min;
         default: return 0;
     }
 }
@@ -332,6 +348,9 @@ static void storeValue(GwConfig& c, int i, uint32_t v) {
         case 49: c.panel_bright        = (uint8_t)v; break;
         case 50: c.panel_step_off_ms   = (uint16_t)v; break;
         case 51: c.panel_step_unlock_ms = (uint16_t)v; break;
+        case 52: c.net_ntp             = v; break;
+        case 53: c.net_ntp_port        = (uint16_t)v; break;
+        case 54: c.time_tz_min         = (int16_t)(uint16_t)v; break;
         default: break;
     }
 }
@@ -438,6 +457,9 @@ bool gwConfig_format(int i, bool staged, char* out, size_t n) {
         case KIND_IP:
             formatIp(valueOf(c, i), out, n);
             return true;
+        case KIND_I16:
+            snprintf(out, n, "%d", (int)c.time_tz_min);
+            return true;
         case KIND_MAC_RO: {
             const uint8_t* m = gwStatus_mac();
             snprintf(out, n, "%02X:%02X:%02X:%02X:%02X:%02X",
@@ -490,6 +512,19 @@ int gwConfig_set(int i, const char* value, char* err, size_t errN) {
         // All-zero is valid and means "follow panel.cabinet's preset".
         return parseRowList(value, _staged.panel_shape, GW_SHAPE_ROWS,
                             GW_SHAPE_MAX_COLS, k.name, err, errN);
+    }
+
+    if (k.kind == KIND_I16) {
+        // The one signed key (time.tz_min). Real-world UTC offsets only:
+        // -12:00 .. +14:00, in minutes.
+        char* end = nullptr;
+        long sv = strtol(value, &end, 10);
+        if (end == value || (end && *end != '\0') || sv < -720 || sv > 840) {
+            snprintf(err, errN, "err=range key=%s allowed=-720..840", k.name);
+            return -1;
+        }
+        _staged.time_tz_min = (int16_t)sv;
+        return 0;
     }
 
     uint32_t v = 0;
@@ -561,6 +596,13 @@ int gwConfig_validateStaged(char* detail, size_t n) {
         snprintf(detail, n, "panel.cabinet=40|64|80");
         return -1;
     }
+    // An NTP server on a disabled network would sit "waiting_for_link"
+    // forever — that is a configuration mistake, said out loud here rather
+    // than discovered months later at the site.
+    if (_staged.net_ntp != 0 && !_staged.net_enabled) {
+        snprintf(detail, n, "net.ntp=needs_net.enabled=1");
+        return -1;
+    }
     return 0;
 }
 
@@ -579,6 +621,9 @@ void gwConfig_applyLive() {
     // No-op until the link is up, including the call from gwConfig_begin()
     // that runs before the network exists at all.
     netRuntime_applyPort(_active.net_port);
+    // A changed net.ntp should not wait for tomorrow's resync; harmless when
+    // nothing changed, and ntp_update() checks enabled/link state itself.
+    ntp_kick();
 }
 
 bool gwConfig_commit(char* applied, size_t appliedN,
@@ -591,9 +636,9 @@ bool gwConfig_commit(char* applied, size_t appliedN,
 
     // Collect what will change before active is overwritten. Grouping by key
     // prefix keeps this honest as keys are added.
-    bool live[6] = { false, false, false, false, false, false };
-    static const char* GROUP[6] = { "rs485", "usb", "net", "bus", "panel",
-                                    "sched" };
+    bool live[7] = { false, false, false, false, false, false, false };
+    static const char* GROUP[7] = { "rs485", "usb", "net", "bus", "panel",
+                                    "sched", "time" };
     size_t pos = 0;
     if (pendingN) pending[0] = '\0';
     for (int i = 0; i < KEY_N; i++) {
@@ -604,7 +649,7 @@ bool gwConfig_commit(char* applied, size_t appliedN,
             continue;
         }
         const char* name = gwConfig_keyName(i);
-        for (int g = 0; g < 6; g++) {
+        for (int g = 0; g < 7; g++) {
             size_t n = strlen(GROUP[g]);
             if (strncmp(name, GROUP[g], n) == 0 && name[n] == '.') live[g] = true;
         }
@@ -614,6 +659,7 @@ bool gwConfig_commit(char* applied, size_t appliedN,
         snprintf(err, errN, "err=store_unavailable");
         return false;
     }
+    eventLog_note(GW_EV_CFG_SAVED, 0, 0);
 
     _active = _staged;
     _source = GwSource::STORED;
@@ -621,7 +667,7 @@ bool gwConfig_commit(char* applied, size_t appliedN,
 
     size_t ap = 0;
     if (appliedN) applied[0] = '\0';
-    for (int g = 0; g < 6; g++) {
+    for (int g = 0; g < 7; g++) {
         if (!live[g]) continue;
         ap += snprintf(applied + ap, (ap < appliedN) ? appliedN - ap : 0,
                        "%s%s", ap ? "," : "", GROUP[g]);

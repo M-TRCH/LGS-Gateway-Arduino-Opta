@@ -19,7 +19,8 @@
 // v7: panel_preset was inserted — which module preset the sweeps fire.
 // v8: panel_bright was inserted — the sweeps' temporary test brightness.
 // v9: panel_step_ms became three paces, one per sweep kind (on/off/unlock).
-#define GW_BLOB_SCHEMA  9
+// v10: net_ntp + net_ntp_port + time_tz_min were appended — NTP recovery.
+#define GW_BLOB_SCHEMA  10
 #define GW_KVSTORE_PARTITION 3
 #define GW_KEY          "gwcfg"
 
@@ -37,7 +38,7 @@ static mbed::BlockDevice*    _root  = nullptr;
 static mbed::MBRBlockDevice* _part  = nullptr;
 static mbed::TDBStore*       _store = nullptr;
 static bool        _ready = false;
-static const char* _lastError = "not initialised";
+static const char* _lastError = "not_initialised";
 
 // CRC-32/ISO-HDLC over everything ahead of the crc32 field.
 static uint32_t crc32_of(const uint8_t* data, size_t len) {
@@ -56,7 +57,7 @@ GwStoreStatus gwStore_begin() {
 
     _root = mbed::BlockDevice::get_default_instance();
     if (!_root || _root->init() != 0) {
-        _lastError = "no block device";
+        _lastError = "no_block_device";
         return GwStoreStatus::UNAVAILABLE;
     }
 
@@ -64,14 +65,14 @@ GwStoreStatus gwStore_begin() {
     // with Arduino's QSPIFormat sketch — report it, never create it.
     _part = new mbed::MBRBlockDevice(_root, GW_KVSTORE_PARTITION);
     if (!_part || _part->init() != 0) {
-        _lastError = "kvstore partition 3 missing";
+        _lastError = "kvstore_partition_3_missing";
         delete _part; _part = nullptr;
         return GwStoreStatus::UNAVAILABLE;
     }
 
     _store = new mbed::TDBStore(_part);
     if (!_store || _store->init() != MBED_SUCCESS) {
-        _lastError = "tdbstore init failed";
+        _lastError = "tdbstore_init_failed";
         delete _store; _store = nullptr;
         _part->deinit();
         delete _part; _part = nullptr;
@@ -97,21 +98,21 @@ GwStoreStatus gwStore_load(GwConfig& out) {
         return GwStoreStatus::NO_RECORD;
     }
     if (rc != MBED_SUCCESS || actual != sizeof(blob)) {
-        _lastError = "record unreadable";
+        _lastError = "record_unreadable";
         return GwStoreStatus::CORRUPT;
     }
     if (blob.magic != GW_BLOB_MAGIC || blob.size != sizeof(GwConfig) ||
         blob.schema != GW_BLOB_SCHEMA) {
-        _lastError = "magic/size/schema mismatch";
+        _lastError = "magic/size/schema_mismatch";
         return GwStoreStatus::CORRUPT;
     }
     uint32_t want = crc32_of((const uint8_t*)&blob, offsetof(GwBlob, crc32));
     if (want != blob.crc32) {
-        _lastError = "crc mismatch";
+        _lastError = "crc_mismatch";
         return GwStoreStatus::CORRUPT;
     }
     if (blob.schema > GW_BLOB_SCHEMA) {
-        _lastError = "schema newer than firmware";
+        _lastError = "schema_newer_than_firmware";
         return GwStoreStatus::CORRUPT;
     }
 
@@ -133,7 +134,7 @@ bool gwStore_save(const GwConfig& in) {
 
     int rc = _store->set(GW_KEY, &blob, sizeof(blob), 0);
     if (rc != MBED_SUCCESS) {
-        _lastError = "write failed";
+        _lastError = "write_failed";
         return false;
     }
     _lastError = "";

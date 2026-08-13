@@ -4,6 +4,7 @@
 
 #include "mbed_rtc_time.h"
 
+#include "event_log.h"
 #include "panel.h"
 
 static bool     _timeSet = false;
@@ -26,12 +27,26 @@ static void forgetFirings() {
 static const char* const DAY_NAME[7] = { "Sun", "Mon", "Tue", "Wed",
                                          "Thu", "Fri", "Sat" };
 
-void sched_setTime(uint32_t epoch) {
+void sched_setTime(uint32_t epoch, TimeSource src) {
+    // Log the transitions worth remembering: unset->set (the recovery after
+    // a power cut) and a real jump. NOT every set — the Test Tool re-syncs
+    // on every connect, and a ring full of one-second corrections would bury
+    // the events the log exists for.
+    const bool wasSet = _timeSet;
+    uint32_t jump = 0;
+    if (wasSet) {
+        const uint32_t old = (uint32_t)time(nullptr);
+        jump = (epoch > old) ? epoch - old : old - epoch;
+    }
     set_time((time_t)epoch);
     _timeSet = true;
     // A clock that has just moved must not fire for a minute it "missed"
     // while it was wrong, nor re-fire one it already served.
     forgetFirings();
+    if (!wasSet || jump > 60) {
+        eventLog_note(GW_EV_CLOCK_SET, src == TimeSource::NTP ? 2 : 1,
+                      (uint16_t)((jump > 65535UL) ? 65535UL : jump));
+    }
 }
 
 bool sched_timeSet() { return _timeSet; }
@@ -135,6 +150,7 @@ void sched_update() {
     if (!due) return;
 
     _lastFire = (uint32_t)t;
+    eventLog_note(GW_EV_SCHED_FIRED, 0, nowHhmm);
     // The same path the white button takes, so a scheduled reset and a pressed
     // one are the same event as far as everything else is concerned.
     panel_startReset();

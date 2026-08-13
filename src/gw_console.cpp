@@ -1,7 +1,9 @@
 #include "gw_console.h"
 
 #include <stdarg.h>
+#include <time.h>
 
+#include "event_log.h"
 #include "gw_config.h"
 #include "modbus_rtu.h"
 #include "panel.h"
@@ -9,6 +11,7 @@
 #include "gw_status.h"
 #include "gw_store.h"
 #include "net_runtime.h"
+#include "ntp.h"
 #include "tcp_bridge.h"
 #include "version.h"
 
@@ -107,10 +110,14 @@ static void doInfo() {
           (storeWhy && *storeWhy) ? storeWhy : "-",
           gwConfig_dirtyCount(), gwConsole_armed() ? 1 : 0);
     const IPAddress ip = netRuntime_localIp();
-    emitf("#DATA net.state=%s net.ip=%u.%u.%u.%u net.port=%u net.client=%d",
+    // net.client counts (0/1/2 — reads as the old 0/1 for one client);
+    // net.peer names them, comma-joined, "-" when none.
+    char peers[48];
+    tcpBridge_clientDesc(peers, sizeof(peers));
+    emitf("#DATA net.state=%s net.ip=%u.%u.%u.%u net.port=%u net.client=%d net.peer=%s",
           netRuntime_stateName(), (unsigned)ip[0], (unsigned)ip[1],
           (unsigned)ip[2], (unsigned)ip[3],
-          gwConfig_active().net_port, tcpBridge_hasClient() ? 1 : 0);
+          gwConfig_active().net_port, tcpBridge_clientCount(), peers);
     emitf("#DATA cnt.usb_ok=%lu cnt.usb_drop=%lu cnt.tcp_ok=%lu",
           (unsigned long)gwStatus_get(GW_USB_OK),
           (unsigned long)gwStatus_get(GW_USB_DROP),
@@ -133,9 +140,16 @@ static void doInfo() {
     emitf("#DATA time.now=%s time.set=%d sched.reset=%s sched.last=%lu",
           nowStr, sched_timeSet() ? 1 : 0, nextStr,
           (unsigned long)sched_lastFireEpoch());
+    emitf("#DATA ntp.state=%s ntp.last=%lu cnt.ntp_ok=%lu cnt.ntp_fail=%lu",
+          ntp_stateName(), (unsigned long)ntp_lastSyncEpoch(),
+          (unsigned long)gwStatus_get(GW_NTP_OK),
+          (unsigned long)gwStatus_get(GW_NTP_FAIL));
+    emitf("#DATA log.state=%s log.n=%lu",
+          eventLog_ok() ? "ok" : "off_error",
+          (unsigned long)eventLog_count());
     emitf("#DATA rtt.last_ms=%u rtt.max_ms=%u rtt.consec_timeout=%u",
           gwStatus_lastRttMs(), gwStatus_maxRttMs(), gwStatus_consecutiveTimeouts());
-    emitf("#OK INFO n=11");
+    emitf("#OK INFO n=13");
 }
 
 // Drive one lamp so the panel's wiring can be checked at the cabinet. Not
@@ -178,8 +192,46 @@ static void doTime(char** argv, int argc) {
           (unsigned long)sched_now());
 }
 
+// Dump the newest N event-log records. Read-only, so ungated like INFO/TIME.
+// The USB CDC blocks while a connected host is not reading (a stalled
+// terminal mid-dump would otherwise ride out the watchdog), so the dog is
+// fed per line.
+static void doLog(char** argv, int argc) {
+    if (!eventLog_ok()) {
+        emit("#ERR LOG err=log_unavailable");
+        return;
+    }
+    uint32_t want = (argc >= 1) ? (uint32_t)strtoul(argv[0], nullptr, 10) : 20UL;
+    if (want < 1)   want = 1;
+    if (want > 100) want = 100;
+
+    uint32_t shown = 0;
+    EventRecord r;
+    for (uint32_t back = 0; back < want; back++) {
+        if (!eventLog_read(back, r)) break;
+        gwStatus_watchdogKick();
+        char when[24];
+        if (r.epoch) {
+            const time_t t = (time_t)r.epoch;
+            struct tm tmv;
+            gmtime_r(&t, &tmv);         // the clock holds wall time already
+            snprintf(when, sizeof(when), "%04d-%02d-%02dT%02d:%02d:%02d",
+                     tmv.tm_year + 1900, tmv.tm_mon + 1, tmv.tm_mday,
+                     tmv.tm_hour, tmv.tm_min, tmv.tm_sec);
+        } else {
+            snprintf(when, sizeof(when), "-");
+        }
+        emitf("#DATA i=%lu t=%s up=%lu ev=%s a=%u p=%u",
+              (unsigned long)r.seq, when, (unsigned long)r.uptimeS,
+              eventLog_typeName(r.type), (unsigned)r.aux, (unsigned)r.param);
+        shown++;
+    }
+    emitf("#OK LOG n=%lu total=%lu", (unsigned long)shown,
+          (unsigned long)eventLog_count());
+}
+
 static void doHelp() {
-    emit("#DATA verbs=PING,INFO,HELP,GET,HELLO,BYE,SET,SAVE,DISCARD,DEFAULTS,REBOOT,LAMP,TIME");
+    emit("#DATA verbs=PING,INFO,HELP,GET,HELLO,BYE,SET,SAVE,DISCARD,DEFAULTS,REBOOT,LAMP,TIME,LOG");
     emit("#DATA note=SET/SAVE/DISCARD/DEFAULTS/REBOOT need HELLO first");
     for (int i = 0; i < gwConfig_keyCount(); i++) {
         emitf("#DATA key=%s%s%s", gwConfig_keyName(i),
@@ -282,6 +334,7 @@ static void dispatch(char* body) {
     else if (strcasecmp(verb, "HELP") == 0) doHelp();
     else if (strcasecmp(verb, "LAMP") == 0) doLamp(rest, restN);
     else if (strcasecmp(verb, "TIME") == 0) doTime(rest, restN);
+    else if (strcasecmp(verb, "LOG")  == 0) doLog(rest, restN);
     else if (strcasecmp(verb, "GET")  == 0) {
         if (restN == 0) { doGetAll(); return; }
         int idx = gwConfig_indexOf(rest[0]);

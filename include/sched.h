@@ -32,8 +32,12 @@ void sched_begin();
 void sched_update();
 void sched_applyConfig();           // called by gw_config on load and save
 
+// Who set the clock — the console's TIME verb (the Test Tool) or the SNTP
+// client. Both hand over WALL time; the tz conversion happened before this.
+enum class TimeSource : uint8_t { TOOL, NTP };
+
 // Set the wall clock. `epoch` is seconds since 1970 in LOCAL time.
-void sched_setTime(uint32_t epoch);
+void sched_setTime(uint32_t epoch, TimeSource src = TimeSource::TOOL);
 bool sched_timeSet();               // false until somebody sets it
 uint32_t sched_now();               // 0 when unset
 

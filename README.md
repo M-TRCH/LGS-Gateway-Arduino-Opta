@@ -117,15 +117,25 @@ What a master must do for a full sweep to succeed:
 | Static IP | `192.168.0.178` | `net.ip` |
 | Modbus TCP port | `502` | `net.port` |
 | MAC address | read from the STM32's OTP | *(read-only, `net.mac`)* |
+| NTP server | `0.0.0.0` = off | `net.ntp` (+ `net.ntp_port`, default 123) |
+| Timezone | `420` (Thailand) | `time.tz_min`, minutes east of UTC |
 
-Ethernet is off out of the box: a gateway shipped for bench use talks over USB only, and a unit that has never been configured should not put an address on someone's LAN. The server accepts **one TCP client at a time** — a second connection is silently closed, which looks exactly like a dead gateway if you do not know it.
+Ethernet is off out of the box: a gateway shipped for bench use talks over USB only, and a unit that has never been configured should not put an address on someone's LAN. The server accepts **two TCP clients** — the hospital's server can stay connected while a technician's Test Tool joins — and a third connection is refused (and logged). `INFO` shows who is connected as `net.peer`.
+
+### NTP time recovery
+
+The Opta cannot keep its clock through a power cut, so out of the box the schedule waits until the Test Tool connects and sets the time. Point `net.ntp` at any NTP server on the LAN — the Test Tool itself can be one, left running on the site's server — and the gateway re-learns the time by itself: one SNTP query after every link-up, re-checked daily, retried every 15 minutes on failure, silently. `net.ntp` takes an **IP address only** (a hostname would mean a DNS wait long enough to trip the watchdog). NTP answers UTC and the clock keeps wall time; `time.tz_min` bridges the two at that boundary only — `$LGS TIME` still hands over wall time unchanged.
+
+### Event log
+
+A ring of ~98,000 fixed records on a raw stretch of the QSPI flash (outside every partition, so re-provisioning does not touch it): every boot with its cause (power-on / watchdog / software), link up/down, clock sets, config saves, scheduled resets firing, panel button presses, TCP clients coming and going. `$LGS LOG [n]` prints the newest *n* (default 20, cap 100), newest first; records written before the clock was set carry `t=-` and an uptime that orders them within their boot. The ring overwrites its oldest sector when full — there is nothing to clear and no way to fill it up.
 
 ## Console
 
 Text lines on the USB port, `$LGS ` prefixed, so the same cable carries Modbus and configuration without a mode switch.
 
 ```
-$LGS PING | INFO | HELP | GET [key] | LAMP <1-4|off> [ms] | TIME [epoch]
+$LGS PING | INFO | HELP | GET [key] | LAMP <1-4|off> [ms] | TIME [epoch] | LOG [n]
 $LGS HELLO            arm a 120 s session (required by the write verbs)
 $LGS SET key=value …  stage changes
 $LGS SAVE             validate, persist, apply live

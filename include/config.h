@@ -66,6 +66,21 @@ extern bool g_logEnabled;
 #define DEF_NET_PORT            502
 #define DEF_NET_LINK_TIMEOUT_MS 1500    // ms – bounded Ethernet.begin() wait
 
+// ── NTP time recovery ──────────────────────────────────────────────────────
+// After a power cut the clock (and so the scheduled resets) recovers with no
+// human visit: one SNTP query to net.ntp after every link-up, re-checked
+// daily. The server is an IP, never a hostname — a DNS lookup can block 15 s,
+// which is a watchdog reset. 0.0.0.0 = feature off (tool-sync only, as
+// before). NTP answers UTC and this firmware keeps WALL time, so time.tz_min
+// (default Thailand, +420) is applied at that boundary and nowhere else.
+#define DEF_NET_NTP             0UL     // NTP server IP, 0 = off
+#define DEF_NET_NTP_PORT        123     // matches the Test Tool's own server
+#define DEF_TIME_TZ_MIN         420     // UTC offset, minutes east
+#define NTP_WAIT_MS             2000UL  // reply deadline per query
+#define NTP_RETRY_MS            900000UL   // failed query: try again in 15 min
+#define NTP_RESYNC_MS           86400000UL // synced: re-check daily
+#define NTP_LOCAL_PORT          50123   // our end of the UDP conversation
+
 // ── Modbus TCP framing ─────────────────────────────────────────────────────
 // The listening port itself is runtime config (net.port), not a constant.
 #define TCP_BUF_SIZE        256

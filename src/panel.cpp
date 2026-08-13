@@ -1,4 +1,5 @@
 #include "panel.h"
+#include "event_log.h"
 #include "modbus_rtu.h"
 #include "gw_status.h"
 #include "gw_store.h"
@@ -344,6 +345,8 @@ void panel_update() {
             // Act on the press, never on the release: holding a button must
             // not run the sweep twice.
             if (level != _idleLevel[i] && _action[i] != PANEL_NONE) {
+                // Manual actions only — a scheduled reset logs its own event.
+                eventLog_note(GW_EV_SWEEP, _action[i], (uint16_t)(i + 1));
                 startSweep(_action[i]);
             }
         }

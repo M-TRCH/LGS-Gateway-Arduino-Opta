@@ -65,13 +65,16 @@ static void bkpWrite(uint32_t reg, uint32_t value) {
     HAL_RTCEx_BKUPWrite(&RTCHandle, reg, value);
 }
 
+static uint8_t _resetCode = 0;      // GW_RST_* — the string, as a number the
+                                    // event log can store in one byte
+
 static void latchResetReason() {
-    if      (__HAL_RCC_GET_FLAG(RCC_FLAG_IWDG1RST)) _resetReason = "watchdog";
-    else if (__HAL_RCC_GET_FLAG(RCC_FLAG_WWDG1RST)) _resetReason = "window-watchdog";
-    else if (__HAL_RCC_GET_FLAG(RCC_FLAG_SFTRST))   _resetReason = "software";
-    else if (__HAL_RCC_GET_FLAG(RCC_FLAG_PINRST))   _resetReason = "pin";
-    else if (__HAL_RCC_GET_FLAG(RCC_FLAG_BORRST))   _resetReason = "brownout";
-    else if (__HAL_RCC_GET_FLAG(RCC_FLAG_PORRST))   _resetReason = "power-on";
+    if      (__HAL_RCC_GET_FLAG(RCC_FLAG_IWDG1RST)) { _resetReason = "watchdog";        _resetCode = 1; }
+    else if (__HAL_RCC_GET_FLAG(RCC_FLAG_WWDG1RST)) { _resetReason = "window-watchdog"; _resetCode = 2; }
+    else if (__HAL_RCC_GET_FLAG(RCC_FLAG_SFTRST))   { _resetReason = "software";        _resetCode = 3; }
+    else if (__HAL_RCC_GET_FLAG(RCC_FLAG_PINRST))   { _resetReason = "pin";             _resetCode = 4; }
+    else if (__HAL_RCC_GET_FLAG(RCC_FLAG_BORRST))   { _resetReason = "brownout";        _resetCode = 5; }
+    else if (__HAL_RCC_GET_FLAG(RCC_FLAG_PORRST))   { _resetReason = "power-on";        _resetCode = 6; }
     __HAL_RCC_CLEAR_RESET_FLAGS();
 }
 
@@ -179,6 +182,7 @@ void gwStatus_markHealthy() {
 }
 
 const char* gwStatus_resetReason() { return _resetReason; }
+uint8_t     gwStatus_resetReasonCode() { return _resetCode; }
 uint32_t    gwStatus_uptimeS()     { return (millis() - _bootMs) / 1000UL; }
 uint32_t    gwStatus_lastRs485Ms() { return _lastRs485Ms; }
 

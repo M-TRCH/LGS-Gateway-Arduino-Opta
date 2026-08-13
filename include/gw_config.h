@@ -66,6 +66,12 @@ struct GwConfig {
     uint32_t net_dns;
     uint16_t net_port;
     uint16_t net_link_timeout_ms;
+    // NTP time recovery (see ntp.cpp). Server as an IP — never a hostname,
+    // DNS can block past the watchdog. 0 = off. The clock keeps wall time,
+    // NTP answers UTC: tz_min bridges the two at the sync boundary only.
+    uint32_t net_ntp;
+    uint16_t net_ntp_port;
+    int16_t  time_tz_min;               // minutes east of UTC, -720..840
     // Front-panel test buttons (see panel.h). Which colour does what is a
     // site decision, so all five are configurable; 0 = the button is unused.
     uint8_t  panel_enabled;

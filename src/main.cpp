@@ -2,11 +2,13 @@
 #include <mbed_wait_api.h>
 
 #include "config.h"
+#include "event_log.h"
 #include "gw_config.h"
 #include "gw_console.h"
 #include "gw_status.h"
 #include "gw_store.h"
 #include "net_runtime.h"
+#include "ntp.h"
 #include "tcp_bridge.h"
 #include "panel.h"
 #include "sched.h"
@@ -70,6 +72,15 @@ void setup() {
     // block; nothing below is allowed to hang the cabinet.
     gwStatus_watchdogBegin(gwConfig_active().sys_wdt_ms);
 
+    // The log's 1.5 MB boot scan sits under the watchdog just started; the
+    // QSPI itself was mounted by gwStore_begin() and the OTP MAC read long
+    // before that. Writes its own boot event (with the reset cause) — the
+    // store operations above happened before the log existed, so they are
+    // reported here instead.
+    eventLog_begin();
+    if (eraseStore)         eventLog_note(GW_EV_STORE_ERASED, 1, 0);
+    else if (forceDefaults) eventLog_note(GW_EV_STORE_ERASED, 2, 0);
+
     // From here the bridge is live. Everything above is bounded; everything
     // below is optional. This ordering is the whole safety story: no stored
     // value and no storage failure can cost the USB bridge.
@@ -100,6 +111,7 @@ void loop() {
     gwConsole_update();
     netRuntime_update();
     if (netRuntime_isUp()) tcpBridge_update();
+    ntp_update();               // checks enabled/link state itself
     gwStatus_update();
     panel_update();
     sched_update();

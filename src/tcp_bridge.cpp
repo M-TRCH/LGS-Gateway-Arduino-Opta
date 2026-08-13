@@ -1,58 +1,79 @@
 #include "tcp_bridge.h"
+#include "event_log.h"
 #include "gw_status.h"
 #include "modbus_rtu.h"
 
 // Constructed without a port: the listener does not exist until net_runtime
 // starts it, so nothing here runs on a gateway with the network switched off.
 static EthernetServer _server;
-static EthernetClient _client;
+static EthernetClient _client[TCP_CLIENT_SLOTS];
 
 // ── Listener lifecycle ─────────────────────────────────────────────────────
 void tcpBridge_start(uint16_t port) {
     // MbedServer::begin() only allocates when its socket is null, so an
     // existing listener has to be released before it will bind a new port.
-    if (_client) _client.stop();
+    for (int i = 0; i < TCP_CLIENT_SLOTS; i++) {
+        if (_client[i]) _client[i].stop();
+    }
     _server.end();
     _server.begin(port);
 }
 
 void tcpBridge_stop() {
-    if (_client) _client.stop();
+    for (int i = 0; i < TCP_CLIENT_SLOTS; i++) {
+        if (_client[i]) _client[i].stop();
+    }
     _server.end();
 }
 
-bool tcpBridge_hasClient() { return (bool)_client; }
-
-// ── Update (call every loop) ───────────────────────────────────────────────
-void tcpBridge_update() {
-    // ── Accept / reject new incoming connection ────────────────────────────
-    EthernetClient newClient = _server.accept();
-    if (newClient) {
-        if (_client) {
-            LOG_SERIAL.print("[NET] Refused connection from "); LOG_SERIAL.print(newClient.remoteIP());
-            LOG_SERIAL.println(" — already serving a client.");
-            newClient.stop();
-        } else {
-            _client = newClient;
-            LOG_SERIAL.print("[NET] Client connected: "); LOG_SERIAL.print(_client.remoteIP());
-            LOG_SERIAL.print(":"); LOG_SERIAL.println(_client.remotePort());
-        }
+bool tcpBridge_hasClient() {
+    for (int i = 0; i < TCP_CLIENT_SLOTS; i++) {
+        if (_client[i]) return true;
     }
+    return false;
+}
 
-    if (!_client) return;
+int tcpBridge_clientCount() {
+    int n = 0;
+    for (int i = 0; i < TCP_CLIENT_SLOTS; i++) {
+        if (_client[i]) n++;
+    }
+    return n;
+}
+
+void tcpBridge_clientDesc(char* out, size_t n) {
+    size_t at = 0;
+    out[0] = '\0';
+    for (int i = 0; i < TCP_CLIENT_SLOTS; i++) {
+        if (!_client[i]) continue;
+        const IPAddress ip = _client[i].remoteIP();
+        at += snprintf(out + at, (at < n) ? n - at : 0, "%s%u.%u.%u.%u:%u",
+                       at ? "," : "", (unsigned)ip[0], (unsigned)ip[1],
+                       (unsigned)ip[2], (unsigned)ip[3],
+                       (unsigned)_client[i].remotePort());
+    }
+    if (at == 0) snprintf(out, n, "-");
+}
+
+// ── One slot's request/response, at most one transaction per call ──────────
+static void serveSlot(int slot) {
+    EthernetClient& cl = _client[slot];
+    if (!cl) return;
 
     // ── Maintain active connection ─────────────────────────────────────────
-    if (!_client.connected()) {
-        LOG_SERIAL.println("[NET] Client disconnected.");
-        _client.stop();
+    if (!cl.connected()) {
+        LOG_SERIAL.print("[NET] Client disconnected (slot ");
+        LOG_SERIAL.print(slot + 1); LOG_SERIAL.println(").");
+        eventLog_note(GW_EV_TCP_CLOSE, (uint8_t)(slot + 1), 0);
+        cl.stop();
         return;
     }
 
     // ── Read MBAP Header (6 bytes) ─────────────────────────────────────────
-    if (_client.available() < MBAP_HEADER_LEN) return;
+    if (cl.available() < MBAP_HEADER_LEN) return;
 
     uint8_t tcp_buf[TCP_BUF_SIZE];
-    if (_client.read(tcp_buf, MBAP_HEADER_LEN) != MBAP_HEADER_LEN) {
+    if (cl.read(tcp_buf, MBAP_HEADER_LEN) != MBAP_HEADER_LEN) {
         LOG_SERIAL.println("[ERR] Failed to read MBAP header.");
         return;
     }
@@ -63,31 +84,31 @@ void tcpBridge_update() {
 
     if (protoId != 0) {
         LOG_SERIAL.println("[ERR] Protocol ID != 0 — not Modbus TCP, discarding.");
-        while (_client.available()) _client.read();
+        while (cl.available()) cl.read();
         return;
     }
     if (mbapLen < 2 || mbapLen > (TCP_BUF_SIZE - MBAP_HEADER_LEN)) {
         LOG_SERIAL.print("[ERR] MBAP Length out of range: "); LOG_SERIAL.println(mbapLen);
-        while (_client.available()) _client.read();
+        while (cl.available()) cl.read();
         return;
     }
 
     // ── Wait for full payload (handles TCP fragmentation) ─────────────────
     unsigned long t_tcp = millis();
-    while (_client.available() < (int)mbapLen) {
+    while (cl.available() < (int)mbapLen) {
         if (millis() - t_tcp > TIMEOUT_TCP_PAYLOAD_MS) {
             LOG_SERIAL.print("[ERR] TCP payload timeout — got ");
-            LOG_SERIAL.print(_client.available()); LOG_SERIAL.print("/"); LOG_SERIAL.println(mbapLen);
-            while (_client.available()) _client.read();
+            LOG_SERIAL.print(cl.available()); LOG_SERIAL.print("/"); LOG_SERIAL.println(mbapLen);
+            while (cl.available()) cl.read();
             return;
         }
     }
 
-    int n = _client.read(tcp_buf + MBAP_HEADER_LEN, (int)mbapLen);
+    int n = cl.read(tcp_buf + MBAP_HEADER_LEN, (int)mbapLen);
     if (n != (int)mbapLen) {
         LOG_SERIAL.print("[ERR] Payload read mismatch: expected "); LOG_SERIAL.print(mbapLen);
         LOG_SERIAL.print(" got "); LOG_SERIAL.println(n);
-        while (_client.available()) _client.read();
+        while (cl.available()) cl.read();
         return;
     }
 
@@ -119,6 +140,9 @@ void tcpBridge_update() {
     }
 
     // ── RS485 transaction ──────────────────────────────────────────────────
+    // Blocking, and serialized by construction: the OTHER slot simply waits
+    // its turn in the same loop iteration. The bus has one wire — two truly
+    // parallel transactions do not exist at this layer anyway.
     uint8_t rx_buf[RTU_BUF_SIZE];
     unsigned long t0 = millis();
     int rx_len = rtu_transact(rtu_buf, rtu_len + 2, rx_buf);
@@ -154,6 +178,36 @@ void tcpBridge_update() {
 
     int resp_total = MBAP_HEADER_LEN + pdu_len;
     printHex("TCP TX", resp, resp_total);
-    _client.write(resp, resp_total);
+    cl.write(resp, resp_total);
     LOG_SERIAL.print("[TCP] Forwarded "); LOG_SERIAL.print(resp_total); LOG_SERIAL.println(" bytes to client.");
+}
+
+// ── Update (call every loop) ───────────────────────────────────────────────
+void tcpBridge_update() {
+    // ── Accept into a free slot, refuse when both are taken ────────────────
+    EthernetClient newClient = _server.accept();
+    if (newClient) {
+        int freeSlot = -1;
+        for (int i = 0; i < TCP_CLIENT_SLOTS; i++) {
+            if (!_client[i]) { freeSlot = i; break; }
+        }
+        if (freeSlot < 0) {
+            LOG_SERIAL.print("[NET] Refused connection from "); LOG_SERIAL.print(newClient.remoteIP());
+            LOG_SERIAL.println(" — both client slots taken.");
+            eventLog_note(GW_EV_TCP_REFUSED, 0, (uint16_t)newClient.remoteIP()[3]);
+            newClient.stop();
+        } else {
+            _client[freeSlot] = newClient;
+            LOG_SERIAL.print("[NET] Client connected (slot "); LOG_SERIAL.print(freeSlot + 1);
+            LOG_SERIAL.print("): "); LOG_SERIAL.print(newClient.remoteIP());
+            LOG_SERIAL.print(":"); LOG_SERIAL.println(newClient.remotePort());
+            eventLog_note(GW_EV_TCP_ACCEPT, (uint8_t)(freeSlot + 1),
+                          (uint16_t)newClient.remoteIP()[3]);
+        }
+    }
+
+    // One request per slot per iteration keeps the loop's worst case at two
+    // bus transactions (~3 s against an 8 s watchdog) and neither client
+    // able to starve the other.
+    for (int i = 0; i < TCP_CLIENT_SLOTS; i++) serveSlot(i);
 }

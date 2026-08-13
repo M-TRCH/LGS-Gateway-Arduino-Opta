@@ -49,17 +49,19 @@ All first-party code lives in `src/` + `include/` (~2000 lines).
 | `config.h` | Pins, LED map, and the **factory defaults** that seed `GwConfig`. Not the live values. |
 | `modbus_rtu` | RTU transport: `crc16`, `verifyCRC`, `rtu_transact()` (pre-TX flush, timed RX, TX-echo strip), `rtu_send()` (broadcast, no reply wait), `rtu_setTimeouts()` |
 | `usb_bridge` | USB COM ↔ RS485 passthrough: gap-delimited frame intake, CRC gate, transactional forward. Rejected bytes go to `gwConsole_feed()`. |
-| `tcp_bridge` | Modbus TCP ↔ RTU re-framing, single client. Listener started/stopped by `net_runtime`; owns no Ethernet state. |
-| `net_runtime` | Bounded `Ethernet.begin()`, link polling, TCP listener lifecycle, `NetState` |
+| `tcp_bridge` | Modbus TCP ↔ RTU re-framing, **two client slots** (`_client[2]`; a third connection is refused). lwIP is compiled for 4 sockets total (inside the prebuilt libmbed.a): listener + 2 clients + NTP's transient UDP = all four — never add a slot. Listener started/stopped by `net_runtime`; owns no Ethernet state. |
+| `net_runtime` | Bounded `Ethernet.begin()`, link polling, TCP listener lifecycle, `NetState`; `startServer()` is the one "link just came up" funnel and kicks `ntp` |
+| `ntp` | SNTP client: transient `EthernetUDP`, IP-only server (`net.ntp`), query on link-up + daily, 15-min retry, silent failure. UTC→wall via `time.tz_min` happens here ONLY |
+| `event_log` | 16-byte-record ring on the RAW QSPI window **14–15.5 MB** (outside every QSPIFormat partition — partition 4 is LittleFS/PLC land, do not move it there). Non-fatal on storage errors; `$LGS LOG` |
 | `gw_config` | Active/staged `GwConfig`, key table, parse + range + cross-field validation, `applyLive()` |
 | `gw_store` | `TDBStore` on QSPI **partition 3**, CRC32 + magic blob, never formats or auto-writes |
 | `gw_console` | The `$LGS` text protocol: line state machine, verbs, session arming |
-| `gw_status` | Counters, RTT, LEDs, OTP MAC, reset reason, RTC-backed boot counter, safe mode |
+| `gw_status` | Counters, RTT, LEDs, OTP MAC, reset reason (string + one-byte code), RTC-backed boot counter, safe mode |
 | `panel` | Front-panel buttons (inputs 1-5), cabinet sweeps, and the four relay outputs — lamps and the shelf's power, all mapped from config |
-| `sched` | Wall clock and the scheduled shelf reset |
+| `sched` | Wall clock and the scheduled shelf reset. `sched_setTime(epoch, src)` is the single clock funnel — both the console's TIME and NTP hand it WALL time |
 | `main.cpp` | Setup ordering (see below) and the loop |
 
-Function naming is module-prefixed: `tcpBridge_*`, `usbBridge_*`, `netRuntime_*`, `gwConfig_*`, `gwStore_*`, `gwConsole_*`, `gwStatus_*`, `panel_*`, `sched_*`, `rtu_*`.
+Function naming is module-prefixed: `tcpBridge_*`, `usbBridge_*`, `netRuntime_*`, `ntp_*`, `eventLog_*`, `gwConfig_*`, `gwStore_*`, `gwConsole_*`, `gwStatus_*`, `panel_*`, `sched_*`, `rtu_*`.
 
 ### Setup ordering is the safety story
 
@@ -70,10 +72,11 @@ Function naming is module-prefixed: `tcpBridge_*`, `usbBridge_*`, `netRuntime_*`
 3. button sample → recovery / erase
 4. `gwStore_begin()` → `gwConfig_begin()` (failure degrades to defaults, never fatal)
 5. `gwStatus_watchdogBegin(sys.wdt_ms)` — **everything below is watchdog-covered**
-6. **`usbBridge_begin()` + `gwConsole_begin()` — from here the bridge is live**
-7. `netRuntime_begin()` — optional; worst case costs `net.link_timeout_ms` of boot time, and the watchdog is kicked immediately before it
+6. `eventLog_begin()` — the 1.5 MB boot scan runs under the fresh watchdog; a QSPI fault turns the log off (`log.state=off_error`), never the boot
+7. **`usbBridge_begin()` + `gwConsole_begin()` — from here the bridge is live**
+8. `netRuntime_begin()` — optional; worst case costs `net.link_timeout_ms` of boot time, and the watchdog is kicked immediately before it
 
-Anything new that can block or fail goes **after** step 6.
+Anything new that can block or fail goes **after** step 7.
 
 ## Runtime configuration
 
@@ -83,16 +86,17 @@ Edit over USB with `$LGS` lines (PuTTY at 115200 works; so does the Test Tool's 
 $LGS PING | INFO | HELP | GET [key]
 $LGS LAMP <1-4|off> [ms]      # drive one relay output, for wiring checks
 $LGS TIME [epoch]             # read or set the wall clock (LOCAL seconds)
+$LGS LOG [n]                  # newest n event-log records (default 20, cap 100)
 $LGS HELLO <who>              # arms a 120 s session — required before any write
 $LGS SET key=value ...        # staged only
 $LGS SAVE | DISCARD | DEFAULTS | REBOOT
 ```
 
-`LAMP` and `TIME` are deliberately **not** session-gated: neither outlives its own timeout, and a clock that needs a session to correct is a clock that spends its life wrong.
+`LAMP`, `TIME` and `LOG` are deliberately **not** session-gated: none outlives its own timeout (LOG is read-only), and a clock that needs a session to correct is a clock that spends its life wrong. LOG kicks the watchdog per emitted line — the USB CDC blocks while a connected host is not reading, and a 100-line dump into a stalled terminal must not reset the gateway.
 
 Every command answers with exactly one terminal `#OK ...` or `#ERR ...` line, optionally preceded by `#DATA` lines. Errors are machine-readable (`err=range key=… allowed=…`).
 
-Keys: `sys.name`, `sys.wdt_ms` (reboot-only), `rs485.*`, `usb.*`, `net.*` (`net.mac` read-only), `bus.hub_map|hub_retry|hub_gap_ms|hub_settle_ms|hub_budget_ms`, `panel.enabled|cabinet|shape|btn1..btn5|step_ms|reset_ms|lamps|lamp_hold_ms|lamp_dwell_ms|lamp_dead|out1..out4`, `sched.reset_enabled|reset_hhmm|reset_hhmm2|reset_hhmm3|reset_hhmm4|reset_slots|reset_days`. `sys.log` is a verb-level volatile toggle, deliberately **not** in `GwConfig`. `panel.shape` (slots per row, `8,8,4` style) overrides `panel.cabinet`'s preset for the button sweeps when non-zero — the escape hatch for a cabinet that is not a 40/64/80; both row-list keys share one parser (`parseRowList`/`formatRowList`). `panel.preset` (1-8) picks which module preset the sweeps fire (coils `1010+p`/`1030+p`) — brightness and colour live in that preset's per-module config, so the panel's look is tuned on the modules, not in the gateway. `panel.bright` (0-100, 0 = off) is the TEST brightness: written per slot to the module's volatile reg 190 before lighting, never persisted module-side — deliberately, so a bench test cannot rewrite a site's configured look.
+Keys: `sys.name`, `sys.wdt_ms` (reboot-only), `rs485.*`, `usb.*`, `net.*` (`net.mac` read-only; `net.ntp` = NTP server **IP**, 0.0.0.0 off; `net.ntp_port`), `time.tz_min` (the one SIGNED key — `KIND_I16` is hard-wired to it the way `KIND_STR` is to `sys.name`; default 420 = Thailand), `bus.hub_map|hub_retry|hub_gap_ms|hub_settle_ms|hub_budget_ms`, `panel.enabled|cabinet|shape|btn1..btn5|step_ms|reset_ms|lamps|lamp_hold_ms|lamp_dwell_ms|lamp_dead|out1..out4`, `sched.reset_enabled|reset_hhmm|reset_hhmm2|reset_hhmm3|reset_hhmm4|reset_slots|reset_days`. `sys.log` is a verb-level volatile toggle, deliberately **not** in `GwConfig`. `panel.shape` (slots per row, `8,8,4` style) overrides `panel.cabinet`'s preset for the button sweeps when non-zero — the escape hatch for a cabinet that is not a 40/64/80; both row-list keys share one parser (`parseRowList`/`formatRowList`). `panel.preset` (1-8) picks which module preset the sweeps fire (coils `1010+p`/`1030+p`) — brightness and colour live in that preset's per-module config, so the panel's look is tuned on the modules, not in the gateway. `panel.bright` (0-100, 0 = off) is the TEST brightness: written per slot to the module's volatile reg 190 before lighting, never persisted module-side — deliberately, so a bench test cannot rewrite a site's configured look.
 
 The key table is **append-only**: `valueOf()`/`storeValue()` switch on the index, so inserting a key silently rewrites the meaning of every key after it.
 

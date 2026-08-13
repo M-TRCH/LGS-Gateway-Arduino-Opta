@@ -15,6 +15,8 @@ enum GwCounter {
     GW_RS485_OK,          // RS485 transactions that got a reply
     GW_RS485_TIMEOUT,     // RS485 transactions with no reply
     GW_CFG_CMD,           // console commands served
+    GW_NTP_OK,            // SNTP queries answered and applied
+    GW_NTP_FAIL,          // SNTP queries that timed out or made no sense
     GW_COUNTER_N
 };
 
@@ -55,6 +57,9 @@ bool        gwStatus_safeMode();
 void        gwStatus_setSafeMode(bool on);
 void        gwStatus_markHealthy();       // clears the boot-attempt counter
 const char* gwStatus_resetReason();
+// The reason as one byte for fixed-size records: 0 unknown, 1 watchdog,
+// 2 window-watchdog, 3 software, 4 pin, 5 brownout, 6 power-on.
+uint8_t     gwStatus_resetReasonCode();
 uint32_t    gwStatus_uptimeS();
 
 // Board identity — the OTP MAC must be cached before any QSPI block device is

@@ -1,7 +1,9 @@
 #include "net_runtime.h"
 
+#include "event_log.h"
 #include "gw_config.h"
 #include "gw_status.h"
+#include "ntp.h"
 #include "tcp_bridge.h"
 
 #define LINK_POLL_MS        500UL
@@ -20,9 +22,17 @@ static IPAddress toIp(uint32_t v) {
 
 static void setState(NetState s) {
     if (s == _state) return;
+    const NetState prev = _state;
     _state = s;
     digitalWrite(LED_LINK_PIN, s == NetState::UP ? HIGH : LOW);
     LOG_SERIAL.print("[NET] state="); LOG_SERIAL.println(netRuntime_stateName());
+    // Every link transition passes through here and nowhere else. SAFE and
+    // DISABLED are boot decisions, not events.
+    if (s == NetState::UP) {
+        eventLog_note(GW_EV_LINK_UP, 0, (uint16_t)Ethernet.localIP()[3]);
+    } else if (prev == NetState::UP && s == NetState::NOLINK) {
+        eventLog_note(GW_EV_LINK_DOWN, 0, 0);
+    }
 }
 
 static void startServer() {
@@ -30,6 +40,10 @@ static void startServer() {
     tcpBridge_start(_listenPort);
     LOG_SERIAL.print("[NET] listening on "); LOG_SERIAL.print(Ethernet.localIP());
     LOG_SERIAL.print(":"); LOG_SERIAL.println(_listenPort);
+    // Both "link just came up" moments (boot and re-link) pass through here
+    // and only here — the one hook the SNTP client needs. applyPort() calls
+    // tcpBridge_start() directly, so a port move never re-fires a query.
+    ntp_kick();
 }
 
 // The interface reports the MAC it actually uses, which is the only one worth

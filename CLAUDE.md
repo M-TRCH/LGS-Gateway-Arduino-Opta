@@ -17,6 +17,8 @@ Cloned from [M-TRCH/LGS-Master](https://github.com/M-TRCH/LGS-Master) branch `Mo
 
 ## Build / upload / test
 
+`test/tcp_console_test.py --mode matrix|fw-dry|two-client` exercises the unit-255 tunnel against the bench (needs pymodbus; run it with the Test Tool's venv).
+
 PlatformIO project, single env `[env:opta]`. On this machine the CLI is
 `C:\Users\mteer\.platformio\penv\Scripts\platformio.exe` (VS Code tasks Build / Upload / Monitor are preconfigured).
 

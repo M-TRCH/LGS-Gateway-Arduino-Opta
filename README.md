@@ -119,6 +119,7 @@ What a master must do for a full sweep to succeed:
 | MAC address | read from the STM32's OTP | *(read-only, `net.mac`)* |
 | NTP server | `0.0.0.0` = off | `net.ntp` (+ `net.ntp_port`, default 123) |
 | Timezone | `420` (Thailand) | `time.tz_min`, minutes east of UTC |
+| TCP console | **on** | `net.console` — off can only be undone over USB |
 
 Ethernet is off out of the box: a gateway shipped for bench use talks over USB only, and a unit that has never been configured should not put an address on someone's LAN. The server accepts **two TCP clients** — the hospital's server can stay connected while a technician's Test Tool joins — and a third connection is refused (and logged). `INFO` shows who is connected as `net.peer`.
 
@@ -133,6 +134,8 @@ A ring of ~98,000 fixed records on a raw stretch of the QSPI flash (outside ever
 ## Console
 
 Text lines on the USB port, `$LGS ` prefixed, so the same cable carries Modbus and configuration without a mode switch.
+
+The same console — same verbs, same session, same staged edits — is also reachable **over the network**: on port 502, Modbus unit id **255** means "the gateway itself", and function code **0x41** tunnels a command line in and pages the reply back out (`gw_remote.h` documents the bytes). Nothing addressed to unit 255 ever touches the RS485 bus. The Test Tool uses this so a site's server can configure the gateway — and update its firmware — with no USB cable: the image streams into `UPDATE.BIN` on the QSPI OTA partition, is CRC-checked by reading it back, and only then is the factory bootloader's apply-magic written and the board rebooted; a power cut or dropped connection mid-upload leaves a file nothing will ever apply. Requires the factory bootloader ≥ v22 (probed first; older units answer "not capable" and keep the USB path).
 
 ```
 $LGS PING | INFO | HELP | GET [key] | LAMP <1-4|off> [ms] | TIME [epoch] | LOG [n]
@@ -166,6 +169,7 @@ include/gw_config.h   The settings struct, the key table's contract
 src/gw_config.cpp     Key table, parse/format, validation, apply-live
 src/gw_store.cpp      Persistence in the QSPI KVStore: magic, schema, size, CRC
 src/gw_console.cpp    The $LGS line protocol
+src/gw_remote.cpp     The same console + firmware update over TCP (unit 255 / FC 0x41)
 src/modbus_rtu.cpp    RTU transport, echo strip, and the RS485 hub settle clock
 src/tcp_bridge.cpp    Modbus TCP server and TCP↔RTU re-framing
 src/usb_bridge.cpp    USB→RS485 passthrough
@@ -185,7 +189,7 @@ Cloned from [`M-TRCH/LGS-Master`](https://github.com/M-TRCH/LGS-Master) branch `
 
 เฟิร์มแวร์ **Gateway แปลง Modbus TCP ↔ Modbus RTU** บน Arduino Opta — รับคำสั่ง Modbus TCP ทาง Ethernet (port 502, รับทีละ 1 client) แล้วส่งต่อไปยังโมดูลบนบัส RS485 และเป็นแผงควบคุมหน้าตู้ด้วย: ปุ่ม 5 ปุ่มกับรีเลย์ 4 ตัวบนขั้วของ Opta ทำให้ทดสอบ ดูสถานะ และตัดไฟตู้ได้ที่หน้าตู้เลย ไม่ต้องมีคอมพิวเตอร์และไม่ต้องมีเครือข่าย
 
-**ทุกอย่างตั้งค่าตอนใช้งานได้** ผ่านคำสั่งข้อความ `$LGS` บนสาย USB (ปกติสั่งจากแท็บ Gateway ของ LGS Test Tool) เฟิร์มแวร์ตัวเดียวจึงใช้ได้ทุกหน้างาน — ปุ่มไหนทำอะไร รีเลย์ไหนเป็นไฟสีอะไรหรือเป็นไฟเลี้ยงชั้นวาง ผังสาย RS485 hub ไปจนถึงเวลารีเซตอัตโนมัติ ล้วนเป็นค่าตั้งทั้งหมด
+**ทุกอย่างตั้งค่าตอนใช้งานได้** ผ่านคำสั่งข้อความ `$LGS` บนสาย USB (ปกติสั่งจากแท็บ Gateway ของ LGS Test Tool) เฟิร์มแวร์ตัวเดียวจึงใช้ได้ทุกหน้างาน — ปุ่มไหนทำอะไร รีเลย์ไหนเป็นไฟสีอะไรหรือเป็นไฟเลี้ยงชั้นวาง ผังสาย RS485 hub ไปจนถึงเวลารีเซตอัตโนมัติ ล้วนเป็นค่าตั้งทั้งหมด — และ**ทำผ่าน TCP ได้เท่า USB ทุกอย่าง** (unit 255 / FC 0x41 บนพอร์ต 502 เดิม) รวมถึงอัพเดตเฟิร์มแวร์ของเกตเวย์เองผ่านเน็ต: ไฟล์ถูกเก็บพักบน QSPI ตรวจ CRC ครบก่อนเท่านั้นจึงสั่ง bootloader ติดตั้ง ไฟดับหรือสายหลุดกลางทางไม่มีผลอะไร (ปิดช่องทางนี้ได้ด้วย `net.console=0` แล้วเปิดคืนได้ทาง USB เท่านั้น)
 
 ข้อควรรู้สามเรื่อง:
 

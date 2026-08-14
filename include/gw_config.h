@@ -119,6 +119,9 @@ struct GwConfig {
     uint16_t sched_reset_hhmm[GW_SCHED_SLOTS];  // 0-2359, wall time
     uint8_t  sched_reset_slots;         // bit0 = slot 1 .. bit3 = slot 4
     uint8_t  sched_reset_days;          // bit0=Sun..bit6=Sat, 0 = every day
+    // The TCP in-band console: unit GW_SELF_UNIT / FC 0x41 on port 502.
+    // Live, checked per request. Off can only be turned back on over USB.
+    uint8_t  net_console;
 };
 
 enum class GwSource : uint8_t { STORED, DEFAULTS, CORRUPT, UNAVAILABLE, MIGRATED };

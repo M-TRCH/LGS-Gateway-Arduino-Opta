@@ -5,6 +5,7 @@
 #include "event_log.h"
 #include "gw_config.h"
 #include "gw_console.h"
+#include "gw_remote.h"
 #include "gw_status.h"
 #include "gw_store.h"
 #include "net_runtime.h"
@@ -109,6 +110,7 @@ void loop() {
 
     usbBridge_update();
     gwConsole_update();
+    gwRemote_update();          // post-APPLY reset + stalled-upload timeout
     netRuntime_update();
     if (netRuntime_isUp()) tcpBridge_update();
     ntp_update();               // checks enabled/link state itself

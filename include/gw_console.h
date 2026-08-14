@@ -27,4 +27,23 @@ void gwConsole_update();
 
 bool gwConsole_armed();
 
+// ── Remote entry (console over TCP, gw_remote.cpp) ─────────────────────────
+// Where a console command's output goes. The default (USB) sink prints to
+// Serial; a remote caller supplies its own and collects the lines.
+typedef void (*GwEmitFn)(const char* line);
+
+// Run ONE command body ("INFO", "SET key value", ...) with every emitted line
+// routed to `sink` for the synchronous duration of the call. `body` is
+// tokenised in place (strtok) — the caller passes its own mutable copy.
+//
+// The session (HELLO arming, staged edits) is ONE state shared by USB and
+// remote callers alike: this gateway assumes a single operator, and the
+// remote path inherits exactly the protections USB has, no more.
+void gwConsole_execute(char* body, GwEmitFn sink);
+
+// Push the armed-session deadline out, exactly as receiving a command does.
+// For the firmware-upload subfunctions, whose frames are not console verbs
+// but must keep the session alive across a long transfer.
+void gwConsole_refreshSession();
+
 #endif // GW_CONSOLE_H

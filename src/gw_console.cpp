@@ -31,7 +31,14 @@ static unsigned long _armedUntil;
 static unsigned long _rebootAt;
 
 // ── Output ─────────────────────────────────────────────────────────────────
+// Normally USB. A remote caller (gw_remote's TCP tunnel) installs a sink for
+// the synchronous duration of one dispatch; nothing here is asynchronous, so
+// a plain static is race-free — usbBridge_update and tcpBridge_update never
+// interleave within a loop pass.
+static GwEmitFn _emitFn = nullptr;
+
 static void emit(const char* line) {
+    if (_emitFn) { _emitFn(line); return; }
     Serial.print(line);
     Serial.print("\r\n");
 }
@@ -388,6 +395,17 @@ static void parseLine() {
     // rejected binary traffic, not a command.
     _len = 0;
     _inLine = false;
+}
+
+// ── Remote entry ───────────────────────────────────────────────────────────
+void gwConsole_execute(char* body, GwEmitFn sink) {
+    _emitFn = sink;
+    dispatch(body);              // synchronous; cannot throw on this target
+    _emitFn = nullptr;
+}
+
+void gwConsole_refreshSession() {
+    refreshSession();
 }
 
 // ── Feed ───────────────────────────────────────────────────────────────────

@@ -38,7 +38,10 @@ enum GwEvent : uint8_t {
     GW_EV_SCHED_FIRED = 9,
     GW_EV_SWEEP       = 10, // aux = PanelAction, param = button 1-5 (manual only —
                             // a scheduled reset is event 9)
-    GW_EV_STORE_ERASED = 11 // aux = 1 button-hold erase / 2 forced defaults
+    GW_EV_STORE_ERASED = 11, // aux = 1 button-hold erase / 2 forced defaults
+    GW_EV_FW           = 12  // network firmware update: aux = 1 stage begun /
+                             // 2 apply ok (reset follows) / 3 CRC mismatch,
+                             // param = image size in KB
 };
 
 struct EventRecord {        // exactly 16 bytes on flash, written once

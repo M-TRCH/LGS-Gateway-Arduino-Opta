@@ -85,6 +85,10 @@ static const KeyDef KEYS[] = {
     { "net.ntp",              KIND_IP,   0, 0,          false },
     { "net.ntp_port",         KIND_U16,  1, 65535,      false },
     { "time.tz_min",          KIND_I16,  0, 0,          false },
+    // The TCP in-band console (unit 255 / FC 0x41). Live, checked per
+    // request. Turning it OFF can only be undone over USB — deliberate:
+    // a site that closes the network door keeps it closed.
+    { "net.console",          KIND_BOOL, 0, 1,          false },
 };
 static const int KEY_N = (int)(sizeof(KEYS) / sizeof(KEYS[0]));
 
@@ -154,6 +158,7 @@ static void defaults(GwConfig& c) {
     c.sched_reset_slots    = DEF_SCHED_RESET_SLOTS;
     c.sched_reset_days     = DEF_SCHED_RESET_DAYS;
     c.sys_wdt_ms           = DEF_WATCHDOG_MS;
+    c.net_console          = DEF_NET_CONSOLE;
 }
 
 static bool parseIp(const char* s, uint32_t* out) {
@@ -293,6 +298,7 @@ static uint32_t valueOf(const GwConfig& c, int i) {
         // Bit pattern, for gwConfig_differs(); rendering goes through the
         // signed KIND_I16 case in gwConfig_format().
         case 54: return (uint32_t)(uint16_t)c.time_tz_min;
+        case 55: return c.net_console;
         default: return 0;
     }
 }
@@ -350,6 +356,7 @@ static void storeValue(GwConfig& c, int i, uint32_t v) {
         case 52: c.net_ntp             = v; break;
         case 53: c.net_ntp_port        = (uint16_t)v; break;
         case 54: c.time_tz_min         = (int16_t)(uint16_t)v; break;
+        case 55: c.net_console         = (uint8_t)v; break;
         default: break;
     }
 }

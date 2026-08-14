@@ -91,6 +91,15 @@ extern bool g_logEnabled;
 #define MBAP_HEADER_LEN     6
 #define TIMEOUT_TCP_PAYLOAD_MS  100UL   // ms – wait for fragmented TCP payload
 
+// ── TCP in-band console (gw_remote) ────────────────────────────────────────
+// Unit id meaning "the gateway itself" on port 502 — never forwarded to the
+// bus (LGS slaves live at 11..108, and 255 is reserved by Modbus anyway).
+// Carries the $LGS console and the network firmware update on FC 0x41.
+// DEF_NET_CONSOLE gates the whole path; turning it off is undone over USB.
+#define GW_SELF_UNIT        255
+#define GW_REMOTE_FC        0x41
+#define DEF_NET_CONSOLE     1
+
 // RS485 switch hub (see modbus_rtu.cpp for the full model). Measured on a
 // live LGS-64 cabinet: the first frame on a new channel triggers the switch
 // and is always lost, and the channel stays deaf for ~2 s — repair frames at

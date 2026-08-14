@@ -20,7 +20,8 @@
 // v8: panel_bright was inserted — the sweeps' temporary test brightness.
 // v9: panel_step_ms became three paces, one per sweep kind (on/off/unlock).
 // v10: net_ntp + net_ntp_port + time_tz_min were appended — NTP recovery.
-#define GW_BLOB_SCHEMA  10
+// v11: net_console appended — the TCP in-band console gate.
+#define GW_BLOB_SCHEMA  11
 #define GW_KVSTORE_PARTITION 3
 #define GW_KEY          "gwcfg"
 

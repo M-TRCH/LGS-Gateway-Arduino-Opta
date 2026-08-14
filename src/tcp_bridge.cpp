@@ -1,5 +1,6 @@
 #include "tcp_bridge.h"
 #include "event_log.h"
+#include "gw_remote.h"
 #include "gw_status.h"
 #include "modbus_rtu.h"
 
@@ -117,6 +118,30 @@ static void serveSlot(int slot) {
     printHex("TCP RX", tcp_buf, tcp_total);
     LOG_SERIAL.print("[TCP] Unit ID="); LOG_SERIAL.print(tcp_buf[6]);
     LOG_SERIAL.print("  FC=0x"); LOG_SERIAL.println(tcp_buf[7], HEX);
+
+    // ── Unit GW_SELF_UNIT: the gateway itself — never the bus ──────────────
+    // The console and the network firmware update ride here. Everything is
+    // answered (exceptions included): 255 is no LGS address, and before this
+    // existed a probe of it burned a full RS485 timeout for nothing.
+    if (tcp_buf[6] == GW_SELF_UNIT) {
+        uint8_t rpdu[TCP_BUF_SIZE];
+        const int rlen = gwRemote_handle(tcp_buf + MBAP_HEADER_LEN + 1,
+                                         (int)mbapLen - 1,
+                                         rpdu, sizeof(rpdu), slot);
+        uint8_t resp[TCP_BUF_SIZE];
+        const int resp_pdu = rlen + 1;              // unit id + PDU
+        resp[0] = (uint8_t)(transId >> 8);
+        resp[1] = (uint8_t)(transId & 0xFF);
+        resp[2] = 0x00;
+        resp[3] = 0x00;
+        resp[4] = (uint8_t)(resp_pdu >> 8);
+        resp[5] = (uint8_t)(resp_pdu & 0xFF);
+        resp[6] = GW_SELF_UNIT;
+        memcpy(resp + 7, rpdu, rlen);
+        printHex("TCP TX", resp, MBAP_HEADER_LEN + resp_pdu);
+        cl.write(resp, MBAP_HEADER_LEN + resp_pdu);
+        return;
+    }
 
     // ── Build RTU frame: strip MBAP, append CRC ────────────────────────────
     int rtu_len = (int)mbapLen;

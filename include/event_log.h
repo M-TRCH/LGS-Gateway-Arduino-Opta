@@ -39,9 +39,17 @@ enum GwEvent : uint8_t {
     GW_EV_SWEEP       = 10, // aux = PanelAction, param = button 1-5 (manual only —
                             // a scheduled reset is event 9)
     GW_EV_STORE_ERASED = 11, // aux = 1 button-hold erase / 2 forced defaults
-    GW_EV_FW           = 12  // network firmware update: aux = 1 stage begun /
+    GW_EV_FW           = 12, // network firmware update: aux = 1 stage begun /
                              // 2 apply ok (reset follows) / 3 CRC mismatch,
                              // param = image size in KB
+    GW_EV_BUS_QUIET    = 13, // the RS485 side went silent en masse (aux = 1)
+                             // and came back (aux = 2, param = seconds down).
+                             // A cabinet losing power looks exactly like this
+                             // from here, and this is the only witness that
+                             // survives with no PC watching.
+    GW_EV_OUT_FIXED    = 14  // a relay output had drifted from its commanded
+                             // level and was re-asserted (aux = output 1-4,
+                             // param = the level it was put back to)
 };
 
 struct EventRecord {        // exactly 16 bytes on flash, written once

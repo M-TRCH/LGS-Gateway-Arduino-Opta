@@ -68,6 +68,16 @@ static uint32_t _forceUntil = 0;
 static uint8_t  _lampTestStep = 0;
 static uint32_t _lampTestNextAt = 0;
 
+// The outputs used to be written ONLY when their state changed, so a pin
+// that lost its level any other way (a brown-out on the MCU's own rail
+// clearing the latch, an ESD event) would have stayed wrong forever with
+// the firmware convinced it was right. They are now re-asserted on a slow
+// tick, and a read-back that disagrees is logged — for the shelf's power
+// that is the difference between a cabinet that comes back by itself and
+// one that waits for somebody to notice.
+static uint32_t _reassertAt = 0;
+static uint8_t  _outDrifted = 0;        // bitmask: already reported, do not spam
+
 // Index 0..3 -> outputs 1..4 on the terminal block.
 static int outPin(uint8_t i) {
     switch (i) {
@@ -316,6 +326,35 @@ static void lampUpdate(uint32_t now) {
     }
 }
 
+// Re-write every output to the level the firmware believes it is at, and
+// report a pin that had drifted. Writing the same level to a GPIO is free
+// and never chatters a relay: the driver sees no edge.
+static void reassertOutputs(uint32_t now) {
+    if ((int32_t)(now - _reassertAt) < 0) return;
+    _reassertAt = now + PANEL_REASSERT_MS;
+    for (uint8_t i = 0; i < PANEL_OUTPUTS; i++) {
+        const int pin = outPin(i);
+        const bool want = _outLit[i] != 0;
+        // digitalRead on an output returns the pin latch, so this catches a
+        // corrupted GPIO — it cannot see a relay contact that dropped out
+        // because its coil supply sagged. That one shows up on the bus, and
+        // is reported by the bus-quiet event instead.
+        const bool drifted = (digitalRead(pin) == HIGH) != want;
+        if (drifted && !(_outDrifted & (1u << i))) {
+            // Once per episode. If a board ever reads its own output back
+            // differently from how it drives it, this must not turn the
+            // event log into a 12-per-minute stream.
+            _outDrifted |= (uint8_t)(1u << i);
+            eventLog_note(GW_EV_OUT_FIXED, (uint8_t)(i + 1), want ? 1 : 0);
+            LOG_SERIAL.print("[PNL] output "); LOG_SERIAL.print(i + 1);
+            LOG_SERIAL.println(" had drifted from its commanded level");
+        } else if (!drifted) {
+            _outDrifted &= (uint8_t)~(1u << i);
+        }
+        digitalWrite(pin, want ? HIGH : LOW);
+    }
+}
+
 void panel_begin() {
     for (uint8_t i = 0; i < PANEL_OUTPUTS; i++) {
         pinMode(outPin(i), OUTPUT);
@@ -338,6 +377,7 @@ void panel_begin() {
 
 void panel_update() {
     const uint32_t now = millis();
+    reassertOutputs(now);
 
     // A reset outlives the press that started it: restore the rails on time
     // whatever else is going on.

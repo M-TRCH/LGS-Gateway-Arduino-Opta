@@ -85,6 +85,11 @@ extern bool g_logEnabled;
 // status lamp stays lit before the next takes over.
 #define PANEL_LAMPTEST_STEP_MS  1000UL
 
+// How often every relay output is re-written to its commanded level. Cheap
+// insurance: a pin that drifted (MCU brown-out clearing the latch) is put
+// back without waiting for a state change that may never come.
+#define PANEL_REASSERT_MS       5000UL
+
 // ── Modbus TCP framing ─────────────────────────────────────────────────────
 // The listening port itself is runtime config (net.port), not a constant.
 #define TCP_BUF_SIZE        256

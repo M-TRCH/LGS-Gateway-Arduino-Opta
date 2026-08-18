@@ -126,6 +126,8 @@ const char* eventLog_typeName(uint8_t type) {
         case GW_EV_SWEEP:        return "panel_sweep";
         case GW_EV_STORE_ERASED: return "store_erased";
         case GW_EV_FW:           return "fw_update";
+        case GW_EV_BUS_QUIET:    return "bus_quiet";
+        case GW_EV_OUT_FIXED:    return "out_fixed";
         default:                 return "unknown";
     }
 }

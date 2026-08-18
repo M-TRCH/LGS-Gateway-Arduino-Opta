@@ -1,5 +1,7 @@
 #include "gw_status.h"
 
+#include "event_log.h"
+
 #include <stm32h7xx_hal.h>
 #include <drivers/Watchdog.h>
 
@@ -138,6 +140,14 @@ void gwStatus_count(GwCounter c) {
     if (c < GW_COUNTER_N) _counters[c]++;
 }
 
+// How many transactions in a row must go unanswered before the bus counts
+// as gone. The cabinet losing power silences every slave at once, so this
+// trips within a second or two; one dead module can never reach it because
+// the poll moves on to the next address.
+#define BUS_QUIET_ENTER   6
+static bool     _busQuiet = false;
+static uint32_t _busQuietSince = 0;
+
 void gwStatus_countRtu(bool replied, uint32_t rttMs) {
     if (rttMs > 0xFFFF) rttMs = 0xFFFF;
     _lastRtt = (uint16_t)rttMs;
@@ -145,10 +155,20 @@ void gwStatus_countRtu(bool replied, uint32_t rttMs) {
     if (replied) {
         _counters[GW_RS485_OK]++;
         _consecTimeouts = 0;
+        if (_busQuiet) {
+            _busQuiet = false;
+            eventLog_note(GW_EV_BUS_QUIET, 2,
+                          (uint16_t)((millis() - _busQuietSince) / 1000UL));
+        }
         digitalWrite(LED_TIMEOUT_PIN, LOW);
     } else {
         _counters[GW_RS485_TIMEOUT]++;
         if (_consecTimeouts < 0xFFFF) _consecTimeouts++;
+        if (!_busQuiet && _consecTimeouts >= BUS_QUIET_ENTER) {
+            _busQuiet = true;
+            _busQuietSince = millis();
+            eventLog_note(GW_EV_BUS_QUIET, 1, _consecTimeouts);
+        }
         digitalWrite(LED_TIMEOUT_PIN, HIGH);
     }
 }

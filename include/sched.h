@@ -17,6 +17,15 @@
  *    - the Test Tool sets it whenever it connects, so in practice it is set
  *      within seconds of a power-up.
  *
+ *  A RESET is not a power cut, and the difference matters. The RTC sits in
+ *  the backup domain and keeps counting through one; what used to be lost was
+ *  only this file's in-RAM memory that its reading meant something, so a
+ *  gateway that rebooted at 15:36 spent the next eighteen hours refusing to
+ *  schedule anything with a perfectly good clock ticking underneath it (seen
+ *  on the bench 2026-08-25: the 03:00 reset never fired). The knowledge now
+ *  lives beside the RTC in the backup domain, so it is kept and lost on
+ *  exactly the same terms the clock itself is.
+ *
  *  The clock keeps WALL time — the time on the wall in front of the cabinet —
  *  not UTC. There is no timezone anywhere in this firmware, and a schedule
  *  that says 03:00 means the 03:00 the pharmacist would recognise.
@@ -32,9 +41,10 @@ void sched_begin();
 void sched_update();
 void sched_applyConfig();           // called by gw_config on load and save
 
-// Who set the clock — the console's TIME verb (the Test Tool) or the SNTP
-// client. Both hand over WALL time; the tz conversion happened before this.
-enum class TimeSource : uint8_t { TOOL, NTP };
+// Who set the clock — the console's TIME verb (the Test Tool), the SNTP
+// client, or the boot-time recovery of an RTC that never stopped. All hand
+// over WALL time; the tz conversion happened before this.
+enum class TimeSource : uint8_t { TOOL, NTP, RESTORED };
 
 // Set the wall clock. `epoch` is seconds since 1970 in LOCAL time.
 void sched_setTime(uint32_t epoch, TimeSource src = TimeSource::TOOL);

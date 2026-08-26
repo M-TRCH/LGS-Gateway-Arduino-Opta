@@ -12,6 +12,12 @@ extern RTC_HandleTypeDef RTCHandle;
 #define BKP_MAGIC       0x4C475701UL      // 'LGW' + version
 #define BKP_REG_MAGIC   RTC_BKP_DR1
 #define BKP_REG_BOOTS   RTC_BKP_DR2
+// Set once the RTC has been given real wall time, cleared by the backup
+// domain losing power. The time itself is NOT stored here — the RTC keeps
+// counting on its own across a reset; what is lost across one is only the
+// knowledge that its reading means anything. See sched_begin().
+#define BKP_REG_CLOCK   RTC_BKP_DR3
+#define BKP_CLOCK_MAGIC 0x4C474331UL      // 'LGC1'
 
 #define RS485_PULSE_MS  30
 #define SAFE_MODE_BOOTS 3
@@ -65,6 +71,14 @@ static uint32_t bkpRead(uint32_t reg) {
 static void bkpWrite(uint32_t reg, uint32_t value) {
     HAL_PWR_EnableBkUpAccess();
     HAL_RTCEx_BKUPWrite(&RTCHandle, reg, value);
+}
+
+void gwStatus_clockMarkValid(bool valid) {
+    bkpWrite(BKP_REG_CLOCK, valid ? BKP_CLOCK_MAGIC : 0);
+}
+
+bool gwStatus_clockWasValid() {
+    return bkpRead(BKP_REG_CLOCK) == BKP_CLOCK_MAGIC;
 }
 
 static uint8_t _resetCode = 0;      // GW_RST_* — the string, as a number the

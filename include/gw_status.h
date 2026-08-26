@@ -56,6 +56,13 @@ uint8_t     gwStatus_bootAttempts();
 bool        gwStatus_safeMode();
 void        gwStatus_setSafeMode(bool on);
 void        gwStatus_markHealthy();       // clears the boot-attempt counter
+
+/*  Whether the RTC's reading still means wall time, kept in the backup domain
+ *  so it survives a reset but not a power cut — which is exactly the right
+ *  lifetime, because the RTC itself behaves the same way. Only sched.cpp
+ *  should touch these; the register map lives here with the others. */
+void gwStatus_clockMarkValid(bool valid);
+bool gwStatus_clockWasValid();
 const char* gwStatus_resetReason();
 // The reason as one byte for fixed-size records: 0 unknown, 1 watchdog,
 // 2 window-watchdog, 3 software, 4 pin, 5 brownout, 6 power-on.

@@ -27,7 +27,7 @@
 
 enum GwEvent : uint8_t {
     GW_EV_BOOT        = 1,  // aux = reset-reason code, param = boot attempts
-    GW_EV_CLOCK_SET   = 2,  // aux = 1 tool / 2 ntp, param = |jump| seconds
+    GW_EV_CLOCK_SET   = 2,  // aux = 1 tool / 2 ntp / 3 restored from RTC, param = |jump| s
                             // (clamped 65535), epoch = the new wall time
     GW_EV_LINK_UP     = 3,  // param = our IP's last octet
     GW_EV_LINK_DOWN   = 4,

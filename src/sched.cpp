@@ -5,7 +5,15 @@
 #include "mbed_rtc_time.h"
 
 #include "event_log.h"
+#include "gw_status.h"
 #include "panel.h"
+
+// Below this the RTC is not carrying wall time, whatever the backup domain
+// says — a cleared or half-powered domain reads as 1970, and no cabinet this
+// firmware runs on was commissioned before 2026. The ceiling catches the
+// mirror case of a register full of ones.
+static const uint32_t CLOCK_FLOOR_EPOCH = 1767225600UL;   // 2026-01-01
+static const uint32_t CLOCK_CEIL_EPOCH  = 4102444800UL;   // 2100-01-01
 
 static bool     _timeSet = false;
 static uint8_t  _enabled = 0;
@@ -40,11 +48,16 @@ void sched_setTime(uint32_t epoch, TimeSource src) {
     }
     set_time((time_t)epoch);
     _timeSet = true;
+    // Say so in the backup domain, so the next boot can tell a running clock
+    // from a meaningless one without asking anybody.
+    gwStatus_clockMarkValid(true);
     // A clock that has just moved must not fire for a minute it "missed"
     // while it was wrong, nor re-fire one it already served.
     forgetFirings();
     if (!wasSet || jump > 60) {
-        eventLog_note(GW_EV_CLOCK_SET, src == TimeSource::NTP ? 2 : 1,
+        const uint8_t aux = src == TimeSource::NTP ? 2
+                          : src == TimeSource::RESTORED ? 3 : 1;
+        eventLog_note(GW_EV_CLOCK_SET, aux,
                       (uint16_t)((jump > 65535UL) ? 65535UL : jump));
     }
 }
@@ -111,6 +124,20 @@ void sched_applyConfig() {
 void sched_begin() {
     forgetFirings();
     sched_applyConfig();
+
+    // A reset does not stop the RTC — only this file's memory of whether its
+    // reading means anything, and that memory now lives in the backup domain
+    // with the clock. Both survive a reset and both die with the backup
+    // domain's power, so believing the marker can never outlive the counting.
+    // The range check is the belt: a domain that browned out rather than
+    // cleared could leave the marker intact over a clock reading nonsense.
+    if (_timeSet || !gwStatus_clockWasValid()) return;
+    const uint32_t now = (uint32_t)time(nullptr);
+    if (now < CLOCK_FLOOR_EPOCH || now >= CLOCK_CEIL_EPOCH) {
+        gwStatus_clockMarkValid(false);     // stale marker, do not trust it again
+        return;
+    }
+    sched_setTime(now, TimeSource::RESTORED);
 }
 
 void sched_update() {

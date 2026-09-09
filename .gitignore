@@ -7,3 +7,6 @@
 # Windows / OneDrive
 Thumbs.db
 desktop.ini
+
+# release staging (the binary lives on the GitHub release, not in git)
+assets/

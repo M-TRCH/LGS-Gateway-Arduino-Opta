@@ -27,7 +27,14 @@ enum PanelAction : uint8_t {
     PANEL_LAMP_TEST  = 5,   // light the status lamps one by one (the shelf's
                             // output is never touched); the yellow button's
                             // default job — check the lamps with no PC
-    PANEL_ACTION_MAX = 5,
+    PANEL_ALL_8      = 6,   // every window of every slot, for the 8-colour
+                            // mask cabinets (type 80). all_on lights ONE
+                            // preset per slot, which on a mask board checks
+                            // one window in eight and says nothing about the
+                            // other seven. Needs module fw >= 3.5.0 to mean
+                            // anything: below that the windows are radio and
+                            // the sweep just ends on window 8.
+    PANEL_ACTION_MAX = 6,
 };
 
 // Slot count of the cabinet a sweep walks. Anything else is treated as 80.

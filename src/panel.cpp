@@ -186,7 +186,10 @@ static uint16_t displayValue(uint8_t slave) {
 static void startSweep(uint8_t action) {
     _running = action;
     _index = 0;
-    _total = (action == PANEL_RESET) ? 0 : panel_activeSlotCount();
+    // all_8 walks (slot, window) pairs, so its length is eight per slot.
+    _total = (action == PANEL_RESET)  ? 0
+           : (action == PANEL_ALL_8)  ? (uint16_t)(panel_activeSlotCount() * 8)
+           : panel_activeSlotCount();
     _nextStepAt = millis();
     if (action == PANEL_RESET) {
         // Only the deadline is set here; whichever output is mapped to the
@@ -209,7 +212,15 @@ static void startLampTest() {
 }
 
 static void stepSweep() {
-    const uint8_t slave = panel_activeSlotAt(_index);
+    // all_8 advances one WINDOW at a time, not one slot: eight windows is
+    // eight coil writes, and doing them in a single tick would hold loop()
+    // — and with it the USB bridge, the TCP bridge and the watchdog kick —
+    // for eight round trips instead of one. Stepping per window keeps every
+    // tick the same size as the other sweeps'.
+    const bool eight = (_running == PANEL_ALL_8);
+    const uint8_t window = eight ? (uint8_t)(_index % 8 + 1) : 0;
+    const uint8_t slave =
+        panel_activeSlotAt(eight ? (uint16_t)(_index / 8) : _index);
     if (slave == 0) { _running = PANEL_NONE; _total = 0; return; }
 
     // Coils 1010+p (ring + display) and 1030+p (plus the latch) for the
@@ -227,8 +238,19 @@ static void stepSweep() {
             writeReg(slave, 60, displayValue(slave));
             writeCoil(slave, (uint16_t)(1030 + _preset), true);
             break;
+        case PANEL_ALL_8:
+            // Brightness once per slot, then that slot's eight windows. On a
+            // ring board the enable coils are radio, so this simply ends on
+            // window 8 — harmless, just not what it is for.
+            if (window == 1 && _bright) writeReg(slave, 190, _bright);
+            writeCoil(slave, (uint16_t)(1000 + window), true);
+            break;
         case PANEL_ALL_OFF:
-            writeCoil(slave, coilDisplay, false);
+            // Coil 511 rather than 1010+preset. All Off is the module's own
+            // "back to the resting state from ANY coil configuration", so it
+            // also puts out the eight windows an all_8 sweep lit; clearing a
+            // single preset's combo coil could only ever clear one of them.
+            writeCoil(slave, 511, true);
             break;
         default:
             break;
@@ -482,6 +504,7 @@ const char* panel_actionName(uint8_t action) {
         case PANEL_ALL_UNLOCK: return "all_unlock";
         case PANEL_RESET:      return "reset";
         case PANEL_LAMP_TEST:  return "lamp_test";
+        case PANEL_ALL_8:      return "all_8";
         default:               return "none";
     }
 }

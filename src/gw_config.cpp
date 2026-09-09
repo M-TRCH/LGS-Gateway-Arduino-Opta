@@ -49,11 +49,11 @@ static const KeyDef KEYS[] = {
     { "bus.hub_settle_ms",    KIND_U16,  200, 5000,     false },
     { "panel.enabled",        KIND_BOOL, 0, 1,          false },
     { "panel.cabinet",        KIND_U16,  40, 80,        false },
-    { "panel.btn1",           KIND_U16,  0, 5,          false },
-    { "panel.btn2",           KIND_U16,  0, 5,          false },
-    { "panel.btn3",           KIND_U16,  0, 5,          false },
-    { "panel.btn4",           KIND_U16,  0, 5,          false },
-    { "panel.btn5",           KIND_U16,  0, 5,          false },
+    { "panel.btn1",           KIND_U16,  0, 6,          false },
+    { "panel.btn2",           KIND_U16,  0, 6,          false },
+    { "panel.btn3",           KIND_U16,  0, 6,          false },
+    { "panel.btn4",           KIND_U16,  0, 6,          false },
+    { "panel.btn5",           KIND_U16,  0, 6,          false },
     // Index 29 was the single panel.step_ms; the name changed with the
     // meaning (all_on's pace) — schema 9 covers the store, and a tool that
     // still says step_ms gets unknown_key rather than a silent half-truth.

@@ -48,7 +48,7 @@ static const KeyDef KEYS[] = {
     { "bus.hub_budget_ms",    KIND_U16,  0, 4000,       false },
     { "bus.hub_settle_ms",    KIND_U16,  200, 5000,     false },
     { "panel.enabled",        KIND_BOOL, 0, 1,          false },
-    { "panel.cabinet",        KIND_U16,  40, 80,        false },
+    { "panel.cabinet",        KIND_U16,  0, 80,         false },
     { "panel.btn1",           KIND_U16,  0, 6,          false },
     { "panel.btn2",           KIND_U16,  0, 6,          false },
     { "panel.btn3",           KIND_U16,  0, 6,          false },
@@ -572,8 +572,10 @@ static bool contiguousMask(uint32_t m) {
 
 int gwConfig_validateStaged(char* detail, size_t n) {
     // The cabinet drives which slots a panel sweep walks, and 40/64/80 are
-    // the shapes that exist — a number in between would light slots that do
-    // not, which reads as a dead row rather than a typo.
+    // the only presets — a number in between would light slots that do not
+    // exist, which reads as a dead row rather than as a typo. 0 is the
+    // escape hatch for a shape the catalogue does not carry; it is checked
+    // below, together with the shape it depends on.
     // HHMM is a clock reading, not a number: 0790 is not a time. Every slot is
     // checked, armed or not — a bad time sitting in a disarmed slot is a trap
     // that springs the day somebody ticks it.
@@ -597,10 +599,26 @@ int gwConfig_validateStaged(char* detail, size_t n) {
             return -1;
         }
     }
-    if (_staged.panel_cabinet != 40 && _staged.panel_cabinet != 64 &&
-        _staged.panel_cabinet != 80) {
-        snprintf(detail, n, "panel.cabinet=40|64|80");
+    // 0 means "no preset, follow panel.shape" — the only way to describe a
+    // cabinet whose shape the catalogue does not carry (the 7x8, the 5x8
+    // fridge) without also storing a slot count that lies about it.
+    if (_staged.panel_cabinet != 0 && _staged.panel_cabinet != 40 &&
+        _staged.panel_cabinet != 64 && _staged.panel_cabinet != 80) {
+        snprintf(detail, n, "panel.cabinet=0|40|64|80");
         return -1;
+    }
+    // ...but 0 with no shape describes nothing at all, and a panel that
+    // walks nothing is a button that looks broken. Both keys stage together
+    // and are validated as one set, so setting them in either order works.
+    if (_staged.panel_cabinet == 0) {
+        bool anyRow = false;
+        for (int r = 0; r < GW_SHAPE_ROWS; r++) {
+            if (_staged.panel_shape[r]) { anyRow = true; break; }
+        }
+        if (!anyRow) {
+            snprintf(detail, n, "panel.cabinet=0_needs_panel.shape");
+            return -1;
+        }
     }
     // An NTP server on a disabled network would sit "waiting_for_link"
     // forever — that is a configuration mistake, said out loud here rather

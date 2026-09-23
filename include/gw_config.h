@@ -104,8 +104,11 @@ struct GwConfig {
     uint8_t  panel_out[4];              // outputs 1, 2, 3, 4
     // The sweep's own shape: slots per row, rows 1-10, 0 = row absent.
     // All-zero means "follow panel_cabinet's preset", which is what every
-    // catalogue cabinet wants — this exists for the cabinet that is not a
-    // 40/64/80, so its front-panel buttons can still walk the real slots.
+    // catalogue cabinet wants — this exists for the cabinet whose geometry
+    // no slot count can express (the 7x8, the 5x8 fridge), so its
+    // front-panel buttons can still walk the real slots. Such a cabinet
+    // should also set panel_cabinet = 0, and the validator insists on a
+    // shape whenever it is 0: the pair is the whole description.
     uint8_t  panel_shape[GW_SHAPE_ROWS];
     // Scheduled power cycle of the shelf. The clock itself is not stored —
     // the Opta cannot keep it through a power cut, so it is set at runtime

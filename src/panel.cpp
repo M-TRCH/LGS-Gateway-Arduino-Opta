@@ -96,10 +96,17 @@ static bool isShelf(uint8_t i) { return _outSrc[i] == SRC_SHELF; }
 // ── Cabinet shapes ─────────────────────────────────────────────────────────
 // The number in an LGS name is the slot count. 40 and 80 are plain blocks;
 // 64 is not — its middle rows are half width, so it is spelled out.
+// A cabinet that is not one of the three presets walks NOTHING. The old
+// catch-all returned 80, so PANEL_CABINET_NONE would have swept eighty slots
+// of a cabinet whose geometry it was explicitly told it does not know —
+// lighting addresses that may not exist and reading as a dead row rather than
+// as the misconfiguration it is. panel_slotAt's bounds check keys off this,
+// so returning 0 here is what makes the whole family safe.
 uint16_t panel_slotCount(uint16_t cabinet) {
     if (cabinet == PANEL_CABINET_40) return 40;
     if (cabinet == PANEL_CABINET_64) return 64;
-    return 80;
+    if (cabinet == PANEL_CABINET_80) return 80;
+    return 0;
 }
 
 uint8_t panel_slotAt(uint16_t cabinet, uint16_t index) {

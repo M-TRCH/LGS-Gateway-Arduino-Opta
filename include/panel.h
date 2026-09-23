@@ -37,7 +37,19 @@ enum PanelAction : uint8_t {
     PANEL_ACTION_MAX = 6,
 };
 
-// Slot count of the cabinet a sweep walks. Anything else is treated as 80.
+// Slot count of the cabinet a sweep walks — but A COUNT IS NOT A SHAPE, and
+// these three are only the shapes that happened to be built first. 40 means
+// ten rows of four; the refrigerated cabinet is also forty slots and is five
+// rows of eight, so it cannot be spelled with this key at all. Neither can
+// the 56. Those cabinets set `panel.shape` instead.
+//
+// PANEL_CABINET_NONE says "there is no preset, follow panel.shape". Without
+// it a shape-driven cabinet is forced to carry a preset that lies about its
+// geometry — which is exactly what left Chest-Nar-01, a 7x8, claiming to be
+// a 64 until 2026-09-23. A cabinet that is none of these has no known
+// geometry and walks nothing, rather than silently walking 80 slots that may
+// not exist.
+#define PANEL_CABINET_NONE   0
 #define PANEL_CABINET_40    40
 #define PANEL_CABINET_64    64
 #define PANEL_CABINET_80    80
@@ -100,12 +112,14 @@ uint8_t     panel_inputMask();      // live input levels, bit0 = input 1
 
 // The slot at `index` of a preset cabinet, or 0 past the end. Exposed for
 // the console so the wiring can be checked without guessing the order.
+// A cabinet with no preset (PANEL_CABINET_NONE) counts 0 slots, so both of
+// these answer 0 for it and every caller's bounds check does the right thing.
 uint8_t panel_slotAt(uint16_t cabinet, uint16_t index);
 uint16_t panel_slotCount(uint16_t cabinet);
 
 // What the sweeps actually walk: `panel.shape` (slots per row) when one is
-// set, else `panel.cabinet`'s preset — so the cabinet that is not a
-// 40/64/80 still gets working front-panel buttons.
+// set, else `panel.cabinet`'s preset — so a cabinet whose geometry the
+// catalogue does not carry still gets working front-panel buttons.
 uint8_t  panel_activeSlotAt(uint16_t index);
 uint16_t panel_activeSlotCount();
 

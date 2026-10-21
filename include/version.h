@@ -3,7 +3,7 @@
 
 // Reported by `$LGS PING` and `$LGS INFO`, and shown in the Test Tool's
 // Gateway tab. Bump on a real release, not on every commit.
-#define GW_FW_VERSION   "1.12.4"
+#define GW_FW_VERSION   "1.13.0-rc1"
 #define GW_FW_BUILD     __DATE__
 
 #endif // VERSION_H

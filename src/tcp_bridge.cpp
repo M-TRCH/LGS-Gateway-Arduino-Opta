@@ -8,6 +8,10 @@
 // starts it, so nothing here runs on a gateway with the network switched off.
 static EthernetServer _server;
 static EthernetClient _client[TCP_CLIENT_SLOTS];
+static bool _excOn = false;     // answer a bus timeout with exception 0x0B
+
+void tcpBridge_setException(bool on) { _excOn = on; }
+bool tcpBridge_exceptionEnabled()    { return _excOn; }
 
 // ── Listener lifecycle ─────────────────────────────────────────────────────
 void tcpBridge_start(uint16_t port) {
@@ -170,11 +174,28 @@ static void serveSlot(int slot) {
     // parallel transactions do not exist at this layer anyway.
     uint8_t rx_buf[RTU_BUF_SIZE];
     unsigned long t0 = millis();
-    int rx_len = rtu_transact(rtu_buf, rtu_len + 2, rx_buf);
+    int rx_len = rtu_transact(rtu_buf, rtu_len + 2, rx_buf, RTU_F_HEAL);
     gwStatus_pulseRs485();
     gwStatus_countRtu(rx_len > 0, millis() - t0);
 
     if (rx_len == 0) {
+        if (_excOn) {
+            // 0x0B: the client hears about the miss now, not at its timeout.
+            uint8_t ex[TCP_BUF_SIZE];
+            ex[0] = (uint8_t)(transId >> 8);
+            ex[1] = (uint8_t)(transId & 0xFF);
+            ex[2] = 0x00;
+            ex[3] = 0x00;
+            ex[4] = 0x00;
+            ex[5] = 0x03;
+            ex[6] = tcp_buf[6];                       // unit id
+            ex[7] = (uint8_t)(tcp_buf[7] | 0x80);     // function | 0x80
+            ex[8] = 0x0B;                             // gateway target failed to respond
+            printHex("TCP TX", ex, 9);
+            cl.write(ex, 9);
+            LOG_SERIAL.println("[TCP] No response from slave — answered exception 0x0B.");
+            return;
+        }
         LOG_SERIAL.println("[ERR] No response from slave — not forwarding to TCP client.");
         return;
     }

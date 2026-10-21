@@ -165,7 +165,7 @@ static void writeCoil(uint8_t slave, uint16_t coil, bool on) {
     tx[6] = (uint8_t)(crc & 0xFF);
     tx[7] = (uint8_t)(crc >> 8);
     uint8_t rx[RTU_BUF_SIZE];
-    rtu_transact(tx, 8, rx);        // reply ignored: a sweep is not a survey
+    rtu_transact(tx, 8, rx, RTU_F_HEAL);   // reply ignored: a sweep is not a survey
 }
 
 static void writeReg(uint8_t slave, uint16_t reg, uint16_t value) {
@@ -180,7 +180,7 @@ static void writeReg(uint8_t slave, uint16_t reg, uint16_t value) {
     tx[6] = (uint8_t)(crc & 0xFF);
     tx[7] = (uint8_t)(crc >> 8);
     uint8_t rx[RTU_BUF_SIZE];
-    rtu_transact(tx, 8, rx);
+    rtu_transact(tx, 8, rx, RTU_F_HEAL);
 }
 
 // What the OLED shows: the slave ID when it fits in two digits, otherwise

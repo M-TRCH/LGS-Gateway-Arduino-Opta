@@ -49,6 +49,16 @@ extern bool g_logEnabled;
 #define DEF_RS485_POST_DELAY_US 1000    // µs – post-TX delay
 #define DEF_TIMEOUT_FIRST_BYTE_MS   300 // ms – wait for first byte from slave
 #define DEF_TIMEOUT_INTER_BYTE_MS   20  // ms – inter-byte frame-gap
+
+// ── Channel re-sync after a missing reply (see modbus_rtu.cpp) ─────────────
+// The modules' libmodbus treats the frame after any request meant for ANOTHER
+// slave as a "confirmation to ignore" — it assumes every request is answered.
+// One request that is not (absent id, silent module, garbled frame) leaves the
+// other modules a frame out of phase and each swallows its own next request.
+// A broadcast read re-aligns all of them; nobody ever answers a broadcast.
+#define RTU_RESYNC_GUARD_MS         15   // ms – quiet after the broadcast, > module frame gap
+#define RTU_RETRY_BUDGET_MS         2000 // ms – retry only if the whole transaction still fits
+                                         //      (bus.hub_budget_ms wins when it is set)
 #define RTU_BUF_SIZE            256
 
 // ── Factory defaults: USB bridge framing ───────────────────────────────────

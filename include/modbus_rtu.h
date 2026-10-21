@@ -23,8 +23,36 @@ void rtu_setTimeouts(uint16_t firstByteMs, uint16_t interByteMs);
 // @param tx     Frame bytes to transmit (must already include trailing CRC).
 // @param tx_len Number of bytes to transmit.
 // @param rx     Caller-allocated buffer (>= RTU_BUF_SIZE bytes).
+// @param flags  RTU_F_* below; 0 (the default) is the plain transaction, which
+//               is exactly what the USB bridge uses — a PC master does its own
+//               timing, so it never gets an extra frame or a delayed reply.
 // @return Number of response bytes received (0 = timeout).
-int rtu_transact(const uint8_t* tx, int tx_len, uint8_t* rx);
+int rtu_transact(const uint8_t* tx, int tx_len, uint8_t* rx, uint8_t flags = 0);
+
+// After a transaction that got NO reply (and only when the hub is not
+// mid-settle — the crossing trigger frame is lost by design):
+//   RTU_F_RESYNC  send one broadcast read so every module is back in phase
+//   RTU_F_RETRY   then ask once more, if this id has answered since boot and
+//                 the whole transaction still fits the budget
+// The retry is safe for writes: coil/register sets are idempotent.
+#define RTU_F_RESYNC 0x01
+#define RTU_F_RETRY  0x02
+#define RTU_F_HEAL   (RTU_F_RESYNC | RTU_F_RETRY)
+
+// Volatile kill switch (`$LGS RESYNC 0|1`), default on at every boot. Not in
+// GwConfig on purpose: a new stored key is a schema bump, which wipes a unit.
+void rtu_setHeal(bool on);
+bool rtu_healEnabled();
+
+// Observability, printed by $LGS INFO as rtu.*:
+//   resync      broadcasts sent
+//   retry_ok    transactions that failed first and were answered by the retry
+//   retry_fail  retries that were not answered either
+// cnt.rs485_timeout stays the FINAL outcome, so first-try misses are
+// cnt.rs485_timeout + rtu.retry_ok.
+uint32_t rtu_resyncCount();
+uint32_t rtu_retryOk();
+uint32_t rtu_retryFail();
 
 /*  Teach the RTU layer the RS485 hub wiring. `map` is GW_HUB_MAX_ROWS bytes,
  *  row 1..N -> channel 1..8 (0 = not behind the hub). All zeros disables the

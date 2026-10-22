@@ -213,6 +213,8 @@ static bool     _healOn = true;
 static uint32_t _resyncN = 0;
 static uint32_t _retryOkN = 0;
 static uint32_t _retryFailN = 0;
+static uint32_t _badCrcN = 0;           // replies that arrived but failed their CRC
+static uint32_t _badOtherN = 0;         // runts and replies from another unit id
 static uint32_t _seenAlive[8] = {0};    // slave ids that have answered since boot
 
 static bool seenAlive(uint8_t id)  { return (_seenAlive[id >> 5] >> (id & 31)) & 1u; }
@@ -223,6 +225,8 @@ bool     rtu_healEnabled()         { return _healOn; }
 uint32_t rtu_resyncCount()         { return _resyncN; }
 uint32_t rtu_retryOk()             { return _retryOkN; }
 uint32_t rtu_retryFail()           { return _retryFailN; }
+uint32_t rtu_badCrc()              { return _badCrcN; }
+uint32_t rtu_badOther()            { return _badOtherN; }
 
 // Broadcast FC03 read of one register: harmless on any module, never answered.
 static void rtu_resync() {
@@ -239,13 +243,26 @@ static bool replyIsFor(const uint8_t* tx, const uint8_t* rx, int rx_len) {
     return rx_len >= 3 && rx[0] == tx[0] && verifyCRC(rx, rx_len);
 }
 
+// Bytes came back but they are not an answer to this request. Before 1.13 this
+// was invisible: the bridge dropped a CRC-bad frame and said nothing, so a
+// module that answered garbled looked exactly like one that stayed silent.
+static void noteBadReply(const uint8_t* tx, const uint8_t* rx, int n) {
+    if (n >= 3 && rx[0] == tx[0]) _badCrcN++;
+    else                          _badOtherN++;
+}
+
 int rtu_transact(const uint8_t* tx, int tx_len, uint8_t* rx, uint8_t flags) {
     const uint32_t start = millis();
     bool healable = false;
     int n = rtu_transact_core(tx, tx_len, rx, &healable);
-    if (tx_len > 0 && replyIsFor(tx, rx, n)) markAlive(tx[0]);
+    const bool valid = (tx_len > 0) && replyIsFor(tx, rx, n);
+    if (valid)       markAlive(tx[0]);
+    else if (n > 0)  noteBadReply(tx, rx, n);
 
-    if (n > 0 || !healable || !_healOn || (flags & RTU_F_RESYNC) == 0 ||
+    // A garbled reply is a missing answer too: it gets the same re-sync and
+    // retry as silence. With the plain transaction (USB bridge) it is returned
+    // as before.
+    if (valid || !healable || !_healOn || (flags & RTU_F_RESYNC) == 0 ||
         tx_len < 1 || tx[0] == 0) {
         return n;
     }
@@ -264,6 +281,7 @@ int rtu_transact(const uint8_t* tx, int tx_len, uint8_t* rx, uint8_t flags) {
         markAlive(tx[0]);
         return n;
     }
+    if (n > 0) noteBadReply(tx, rx, n);
     // The retry went unanswered too, which put everyone out of phase again.
     _retryFailN++;
     rtu_resync();
@@ -273,27 +291,63 @@ int rtu_transact(const uint8_t* tx, int tx_len, uint8_t* rx, uint8_t flags) {
 static int rtu_once(const uint8_t* tx, int tx_len, uint8_t* rx) {
     rtu_send(tx, tx_len);
 
-    // Receive response with timeout
-    int rx_len = 0;
+    // The Opta's auto-direction transceiver loops our own frame back into the
+    // receiver, so the first tx_len bytes that arrive are an echo. Up to 1.12
+    // they were counted as reply bytes, which switched the wait from "first
+    // byte" (t1) to "inter-byte" (t2, 20 ms): a module had ~20 ms after the end
+    // of our frame to start answering, whatever rs485.t1_ms said. Modules that
+    // stall for 25-60 ms (the hourly stats flush) were declared silent in ~16 %
+    // of their hour marks. So the echo is consumed explicitly here, and the
+    // first reply byte gets its own window (RTU_REPLY_WINDOW_MS, capped by t1).
+    // Without an echo (the hub crossing trigger frame, other transceivers) the
+    // first byte is the reply and t1 applies as before.
+    const unsigned long firstMs =
+        (_t_first_ms < RTU_REPLY_WINDOW_MS) ? _t_first_ms : RTU_REPLY_WINDOW_MS;
+    int  rx_len = 0;
+    int  echo = 0;                       // echo bytes consumed so far
+    bool echoDone = false;               // the whole echo was consumed
+    bool echoOver = false;               // echo finished or never started
     bool receiving = false;
     unsigned long t = millis();
 
     while (true) {
         if (RS485.available()) {
-            uint8_t b = (uint8_t)RS485.read();
+            const uint8_t b = (uint8_t)RS485.read();
+            if (!echoOver && !receiving && echo < tx_len && b == tx[echo]) {
+                echo++;
+                t = millis();
+                if (echo == tx_len) { echoOver = true; echoDone = true; }   // the real wait starts now
+                continue;
+            }
+            if (!echoOver && echo > 0) {
+                // No echo after all: what looked like its first bytes were the
+                // reply's (a reply starts with the same unit id and function).
+                memcpy(rx, tx, echo);
+                rx_len = echo;
+                echo = 0;
+            }
+            echoOver = true;
             if (rx_len < RTU_BUF_SIZE) {
                 rx[rx_len++] = b;
                 t = millis();
                 receiving = true;
             }
         }
-        unsigned long elapsed = millis() - t;
-        if (!receiving && elapsed > _t_first_ms) break;
-        if ( receiving && elapsed > _t_inter_ms) break;
+        const unsigned long elapsed = millis() - t;
+        if (!receiving) {
+            // Before any reply byte: the first-byte window if the echo is over,
+            // t1 if there was none (or it is still arriving).
+            if (elapsed > (echoOver && echo == tx_len ? firstMs : _t_first_ms)) break;
+        } else if (elapsed > _t_inter_ms) {
+            break;
+        }
     }
 
-    // Strip TX echo if the transceiver looped back our own frame
-    if (rx_len >= tx_len && memcmp(rx, tx, tx_len) == 0) {
+    // Strip a TX echo that was not consumed above (it arrived interleaved with
+    // the reply).
+    // A reply that IS the request (FC05/FC06 answer with an exact copy) must
+    // survive when the echo was already consumed above.
+    if (!echoDone && rx_len >= tx_len && memcmp(rx, tx, tx_len) == 0) {
         int rem = rx_len - tx_len;
         if (rem > 0) memmove(rx, rx + tx_len, rem);
         rx_len = rem;

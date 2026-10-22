@@ -142,6 +142,8 @@ static void doInfo() {
           rtu_healEnabled() ? 1 : 0, (unsigned long)rtu_resyncCount(),
           (unsigned long)rtu_retryOk(), (unsigned long)rtu_retryFail(),
           tcpBridge_exceptionEnabled() ? 1 : 0);
+    emitf("#DATA rtu.bad_crc=%lu rtu.bad_other=%lu",
+          (unsigned long)rtu_badCrc(), (unsigned long)rtu_badOther());
     emitf("#DATA panel.state=%s panel.step=%u/%u panel.in=0x%02X panel.lamp=%s",
           panel_stateName(), panel_progress(), panel_total(),
           (unsigned)panel_inputMask(), panel_lampName());
@@ -162,7 +164,7 @@ static void doInfo() {
           (unsigned long)eventLog_count());
     emitf("#DATA rtt.last_ms=%u rtt.max_ms=%u rtt.consec_timeout=%u",
           gwStatus_lastRttMs(), gwStatus_maxRttMs(), gwStatus_consecutiveTimeouts());
-    emitf("#OK INFO n=14");
+    emitf("#OK INFO n=15");
 }
 
 // Volatile switches: `RESYNC` (broadcast re-sync + one retry after a missing

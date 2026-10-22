@@ -53,6 +53,12 @@ bool rtu_healEnabled();
 uint32_t rtu_resyncCount();
 uint32_t rtu_retryOk();
 uint32_t rtu_retryFail();
+// Replies that came back but were not an answer: bad_crc = right unit id, wrong
+// CRC; bad_other = runts and frames from another unit id. A cold, flaky or
+// noisy module shows up here when it answers garbled; one that stays silent
+// shows up only in cnt.rs485_timeout.
+uint32_t rtu_badCrc();
+uint32_t rtu_badOther();
 
 /*  Teach the RTU layer the RS485 hub wiring. `map` is GW_HUB_MAX_ROWS bytes,
  *  row 1..N -> channel 1..8 (0 = not behind the hub). All zeros disables the

@@ -59,6 +59,11 @@ extern bool g_logEnabled;
 #define RTU_RESYNC_GUARD_MS         15   // ms – quiet after the broadcast, > module frame gap
 #define RTU_RETRY_BUDGET_MS         2000 // ms – retry only if the whole transaction still fits
                                          //      (bus.hub_budget_ms wins when it is set)
+#define RTU_REPLY_WINDOW_MS         150  // ms – how long a module may take to START its reply once the
+                                         //      transceiver's echo of our own frame is over (capped by
+                                         //      rs485.t1_ms). Measured 2026-10-21: modules that stall >20 ms
+                                         //      (hourly stats flush) answer inside 120 ms; the old 20 ms
+                                         //      deadline (t2 after the echo) gave up on ~16 % of hour marks.
 #define RTU_BUF_SIZE            256
 
 // ── Factory defaults: USB bridge framing ───────────────────────────────────

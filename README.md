@@ -133,6 +133,17 @@ The Opta cannot keep its clock through a power cut, so out of the box the schedu
 
 A ring of ~98,000 fixed records on a raw stretch of the QSPI flash (outside every partition, so re-provisioning does not touch it): every boot with its cause (power-on / watchdog / software), link up/down, clock sets, config saves, scheduled resets firing, panel button presses, TCP clients coming and going. `$LGS LOG [n]` prints the newest *n* (default 20, cap 100), newest first; records written before the clock was set carry `t=-` and an uptime that orders them within their boot. The ring overwrites its oldest sector when full — there is nothing to clear and no way to fill it up.
 
+## Unanswered requests, re-sync and retry
+
+Two things go wrong on a multi-drop RS485 channel when a request gets no reply, and v1.13 handles both:
+
+1. **The module firmware loses its place.** The libmodbus inside ArduinoModbus 1.0.9 discards the frame that follows any frame for another slave, assuming a reply was in between. An unanswered request (a dead id, a stalled module, a frame cut by the hub) therefore puts every other module on the channel one frame out of phase, and they stay silent until something shifts the parity — the "first try fails, second try works" pattern. After a missing reply the gateway sends one **broadcast read** (unit 0, never answered) to put every module back in phase and **retries once**. The retry only happens for an id that has answered since boot and only inside a 2 s budget. Modules on firmware ≥ 3.5.5 no longer have the problem; the gateway side stays as a safety net.
+2. **The transceiver echoes what the gateway sends.** The old code took the echo for the start of the reply, which left only `rs485.t2_ms` (20 ms) to wait for the first reply byte — shorter than a module's hourly stats flush. The echo is now consumed and the first byte gets its own 150 ms window (never longer than `rs485.t1_ms`).
+
+The USB bridge is untouched: a PC master does its own timing and must never receive an extra frame.
+
+Volatile console switches (reset at every boot, `HELLO` needed to change): `$LGS RESYNC 0|1` (default 1) and `$LGS EXC 0|1` (default 0 — with 1, a missing reply answers with Modbus exception 0x0B immediately instead of letting the master time out). `$LGS INFO` shows `rtu.heal`, `rtu.resync`, `rtu.retry_ok`, `rtu.retry_fail`, `rtu.bad_crc`, `rtu.bad_other`, `tcp.exc`. First-try misses are `cnt.rs485_timeout + rtu.retry_ok`.
+
 ## Console
 
 Text lines on the USB port, `$LGS ` prefixed, so the same cable carries Modbus and configuration without a mode switch.
@@ -145,6 +156,7 @@ $LGS HELLO            arm a 120 s session (required by the write verbs)
 $LGS SET key=value …  stage changes
 $LGS SAVE             validate, persist, apply live
 $LGS DISCARD | DEFAULTS | REBOOT | BYE
+$LGS RESYNC [0|1] | EXC [0|1]   volatile switches, see "Unanswered requests" above
 ```
 
 Write verbs need an armed session so a false positive from binary Modbus traffic can never mutate anything. `SAVE` reports which groups took effect (`applied=bus,panel`) and which keys need a reboot.
@@ -189,7 +201,7 @@ Cloned from [`M-TRCH/LGS-Master`](https://github.com/M-TRCH/LGS-Master) branch `
 
 ## สรุปภาษาไทย
 
-เฟิร์มแวร์ **Gateway แปลง Modbus TCP ↔ Modbus RTU** บน Arduino Opta — รับคำสั่ง Modbus TCP ทาง Ethernet (port 502, รับทีละ 1 client) แล้วส่งต่อไปยังโมดูลบนบัส RS485 และเป็นแผงควบคุมหน้าตู้ด้วย: ปุ่ม 5 ปุ่มกับรีเลย์ 4 ตัวบนขั้วของ Opta ทำให้ทดสอบ ดูสถานะ และตัดไฟตู้ได้ที่หน้าตู้เลย ไม่ต้องมีคอมพิวเตอร์และไม่ต้องมีเครือข่าย
+เฟิร์มแวร์ **Gateway แปลง Modbus TCP ↔ Modbus RTU** บน Arduino Opta — รับคำสั่ง Modbus TCP ทาง Ethernet (port 502, รับพร้อมกันได้สูงสุด 2 client) แล้วส่งต่อไปยังโมดูลบนบัส RS485 และเป็นแผงควบคุมหน้าตู้ด้วย: ปุ่ม 5 ปุ่มกับรีเลย์ 4 ตัวบนขั้วของ Opta ทำให้ทดสอบ ดูสถานะ และตัดไฟตู้ได้ที่หน้าตู้เลย ไม่ต้องมีคอมพิวเตอร์และไม่ต้องมีเครือข่าย
 
 **ทุกอย่างตั้งค่าตอนใช้งานได้** ผ่านคำสั่งข้อความ `$LGS` บนสาย USB (ปกติสั่งจากแท็บ Gateway ของ LGS Test Tool) เฟิร์มแวร์ตัวเดียวจึงใช้ได้ทุกหน้างาน — ปุ่มไหนทำอะไร รีเลย์ไหนเป็นไฟสีอะไรหรือเป็นไฟเลี้ยงชั้นวาง ผังสาย RS485 hub ไปจนถึงเวลารีเซตอัตโนมัติ ล้วนเป็นค่าตั้งทั้งหมด — และ**ทำผ่าน TCP ได้เท่า USB ทุกอย่าง** (unit 255 / FC 0x41 บนพอร์ต 502 เดิม) รวมถึงอัพเดตเฟิร์มแวร์ของเกตเวย์เองผ่านเน็ต: ไฟล์ถูกเก็บพักบน QSPI ตรวจ CRC ครบก่อนเท่านั้นจึงสั่ง bootloader ติดตั้ง ไฟดับหรือสายหลุดกลางทางไม่มีผลอะไร (ปิดช่องทางนี้ได้ด้วย `net.console=0` แล้วเปิดคืนได้ทาง USB เท่านั้น)
 
@@ -200,3 +212,6 @@ Cloned from [`M-TRCH/LGS-Master`](https://github.com/M-TRCH/LGS-Master) branch `
 **นาฬิกาของ Opta ไม่มีแบตเตอรี่** เวลาหายทุกครั้งที่ไฟดับ ระบบจึงไม่ยิงตารางใดๆ จนกว่าจะมีคนตั้งเวลา (Test Tool ตั้งให้เองอัตโนมัติ) และนาฬิกาเก็บเวลาท้องถิ่น ไม่ใช่ UTC ตารางรีเซตตั้งได้ **4 ช่วงต่อวัน** ติ๊กเปิดเฉพาะช่วงที่ต้องการ ช่วงที่ปิดไว้ยังเก็บเวลาเดิม
 
 **watchdog** จะรีเซตบอร์ดถ้าเฟิร์มแวร์หยุดทำงานเกิน `sys.wdt_ms` (ค่าเริ่มต้น 8000 มิลลิวินาที) เริ่มทำงานตั้งแต่กลาง `setup()` จึงครอบคลุมช่วงรอลิงก์ Ethernet ที่เป็นจุดค้างได้จริง — และด้วยเหตุนี้ค่าที่ตั้งต้องมากกว่าเวลารอลิงก์ ไม่งั้นบอร์ดจะรีเซตตัวเองวนไม่จบ (ระบบตรวจให้แล้วตอน SAVE) การเปลี่ยนค่ามีผลเมื่อรีสตาร์ท เพราะ IWDG ของ STM32 ตั้งใหม่ระหว่างทำงานไม่ได้
+
+**ไม่มีคำตอบจากโมดูลหนึ่งครั้ง ทำให้ทั้งช่องเสียจังหวะได้** (บั๊กใน libmodbus ของโมดูลรุ่นก่อน 3.5.5: โมดูลทิ้ง frame ถัดไปทุกครั้งหลังเห็น frame ของตัวอื่น) เกตเวย์ v1.13 จึงส่ง broadcast อ่าน (unit 0 ไม่มีใครตอบ) เพื่อให้ทุกโมดูลกลับเข้าจังหวะ แล้วถามซ้ำ 1 ครั้ง และเปลี่ยนวิธีรอคำตอบให้ตัดเสียงสะท้อนของตัวรับส่งออกก่อน แล้วรอ byte แรกของคำตอบ 150 มิลลิวินาที ไม่ใช่ 20 (USB bridge ไม่ถูกแตะ) ตัวสวิตช์ `$LGS RESYNC` / `$LGS EXC` เป็นค่าชั่วคราว กลับค่าเริ่มต้นทุกครั้งที่บูต
+

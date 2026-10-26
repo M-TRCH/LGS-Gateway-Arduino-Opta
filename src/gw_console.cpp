@@ -136,6 +136,14 @@ static void doInfo() {
     emitf("#DATA hub.cross=%lu hub.extra=%lu hub.wait_ms=%lu hub.skip=%lu",
           (unsigned long)rtu_hubCross(), (unsigned long)rtu_hubExtra(),
           (unsigned long)rtu_hubWaitMs(), (unsigned long)rtu_hubSkip());
+    // First-try misses = cnt.rs485_timeout + rtu.retry_ok (rs485_timeout is the
+    // final outcome, after any retry).
+    emitf("#DATA rtu.heal=%d rtu.resync=%lu rtu.retry_ok=%lu rtu.retry_fail=%lu tcp.exc=%d",
+          rtu_healEnabled() ? 1 : 0, (unsigned long)rtu_resyncCount(),
+          (unsigned long)rtu_retryOk(), (unsigned long)rtu_retryFail(),
+          tcpBridge_exceptionEnabled() ? 1 : 0);
+    emitf("#DATA rtu.bad_crc=%lu rtu.bad_other=%lu",
+          (unsigned long)rtu_badCrc(), (unsigned long)rtu_badOther());
     emitf("#DATA panel.state=%s panel.step=%u/%u panel.in=0x%02X panel.lamp=%s",
           panel_stateName(), panel_progress(), panel_total(),
           (unsigned)panel_inputMask(), panel_lampName());
@@ -156,7 +164,24 @@ static void doInfo() {
           (unsigned long)eventLog_count());
     emitf("#DATA rtt.last_ms=%u rtt.max_ms=%u rtt.consec_timeout=%u",
           gwStatus_lastRttMs(), gwStatus_maxRttMs(), gwStatus_consecutiveTimeouts());
-    emitf("#OK INFO n=13");
+    emitf("#OK INFO n=15");
+}
+
+// Volatile switches: `RESYNC` (broadcast re-sync + one retry after a missing
+// RS485 reply) and `EXC` (answer a bus timeout with exception 0x0B). Neither is
+// a GwConfig key — a new stored key is a schema bump, which wipes the unit — so
+// both return to their defaults at every boot. Reading is free; changing needs
+// an armed session like every other write.
+static void doToggle(const char* name, char** argv, int argc,
+                     bool (*get)(), void (*set)(bool)) {
+    if (argc < 1) { emitf("#OK %s=%d", name, get() ? 1 : 0); return; }
+    bool on;
+    if      (!strcmp(argv[0], "1") || !strcasecmp(argv[0], "on"))  on = true;
+    else if (!strcmp(argv[0], "0") || !strcasecmp(argv[0], "off")) on = false;
+    else { emitf("#ERR %s err=syntax want=0|1", name); return; }
+    if (!gwConsole_armed()) { emitf("#ERR %s err=locked hint=HELLO", name); return; }
+    set(on);
+    emitf("#OK %s=%d volatile=1", name, on ? 1 : 0);
 }
 
 // Drive one lamp so the panel's wiring can be checked at the cabinet. Not
@@ -238,8 +263,8 @@ static void doLog(char** argv, int argc) {
 }
 
 static void doHelp() {
-    emit("#DATA verbs=PING,INFO,HELP,GET,HELLO,BYE,SET,SAVE,DISCARD,DEFAULTS,REBOOT,LAMP,TIME,LOG");
-    emit("#DATA note=SET/SAVE/DISCARD/DEFAULTS/REBOOT need HELLO first");
+    emit("#DATA verbs=PING,INFO,HELP,GET,HELLO,BYE,SET,SAVE,DISCARD,DEFAULTS,REBOOT,LAMP,TIME,LOG,RESYNC,EXC");
+    emit("#DATA note=SET/SAVE/DISCARD/DEFAULTS/REBOOT and RESYNC/EXC with a value need HELLO first; RESYNC/EXC are volatile (default RESYNC=1 EXC=0 at every boot)");
     for (int i = 0; i < gwConfig_keyCount(); i++) {
         emitf("#DATA key=%s%s%s", gwConfig_keyName(i),
               gwConfig_isReadOnly(i) ? " ro=1" : "",
@@ -342,6 +367,8 @@ static void dispatch(char* body) {
     else if (strcasecmp(verb, "LAMP") == 0) doLamp(rest, restN);
     else if (strcasecmp(verb, "TIME") == 0) doTime(rest, restN);
     else if (strcasecmp(verb, "LOG")  == 0) doLog(rest, restN);
+    else if (strcasecmp(verb, "RESYNC") == 0) doToggle("RESYNC", rest, restN, rtu_healEnabled, rtu_setHeal);
+    else if (strcasecmp(verb, "EXC")    == 0) doToggle("EXC", rest, restN, tcpBridge_exceptionEnabled, tcpBridge_setException);
     else if (strcasecmp(verb, "GET")  == 0) {
         if (restN == 0) { doGetAll(); return; }
         int idx = gwConfig_indexOf(rest[0]);

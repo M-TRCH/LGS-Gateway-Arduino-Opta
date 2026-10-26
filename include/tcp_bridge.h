@@ -32,4 +32,13 @@ int  tcpBridge_clientCount();
 // "ip:port,ip:port", "ip:port", or "-" — console-safe (never a space).
 void tcpBridge_clientDesc(char* out, size_t n);
 
+// When the bus gives no reply: stay silent (default, the contract so far) or
+// answer the client at once with Modbus exception 0x0B (gateway target failed
+// to respond), so it learns in milliseconds instead of at its own timeout.
+// Volatile (`$LGS EXC 0|1`), off at every boot: it changes what the server
+// sees, so it is switched on per site by agreement, and a stored key would
+// be a config schema bump.
+void tcpBridge_setException(bool on);
+bool tcpBridge_exceptionEnabled();
+
 #endif // TCP_BRIDGE_H

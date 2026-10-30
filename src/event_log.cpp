@@ -4,6 +4,7 @@
 #include <SlicingBlockDevice.h>
 
 #include "gw_status.h"
+#include "modbus_rtu.h"
 #include "sched.h"
 
 // The raw QSPI window, byte offsets on the 16 MB chip. Everything below
@@ -109,6 +110,76 @@ bool eventLog_read(uint32_t back, EventRecord& out) {
     return out.seq == seq;              // torn/overwritten slot reads false
 }
 
+uint32_t eventLog_oldest() {
+    if (!_ok || _nextSeq <= 1) return 0;
+    const uint32_t newest = _nextSeq - 1;
+    uint32_t start = (newest >= EVLOG_RECORDS) ? newest - (EVLOG_RECORDS - 1) : 1;
+    // Entering a sector erases its 256 oldest slots at once, so the nominal
+    // oldest may already be gone: walk forward to the first one that reads.
+    EventRecord r;
+    for (uint32_t i = 0; i < 300 && start <= newest; i++, start++) {
+        if (eventLog_read(newest - start, r)) return start;
+    }
+    return newest;
+}
+
+// ---- coil events: token bucket ---------------------------------------------
+// 120 events of burst, refilled at 10/s. A pharmacy server's normal pace is a
+// few per second at most; anything sustained above 10/s is a loop gone wrong.
+#define COIL_EV_BURST   120UL
+#define COIL_EV_PER_S   10UL
+static uint32_t _coilTokens   = COIL_EV_BURST * 1000UL;   // milli-tokens
+static uint32_t _coilLastMs   = 0;
+static uint32_t _coilDropped  = 0;
+static uint32_t _dropReportMs = 0;
+
+void eventLog_noteCoil(uint8_t unit, uint16_t addr, bool on, bool noReply) {
+    if (!_ok) return;
+    const uint32_t now = millis();
+    uint32_t idle = now - _coilLastMs;
+    if (idle > 60000UL) idle = 60000UL;     // a full bucket long before this; no overflow
+    const uint32_t add = idle * COIL_EV_PER_S;              // milli-tokens
+    _coilLastMs = now;
+    _coilTokens = min(_coilTokens + add, COIL_EV_BURST * 1000UL);
+    if (_coilTokens < 1000UL) {
+        _coilDropped++;
+        return;
+    }
+    _coilTokens -= 1000UL;
+    uint16_t p = (uint16_t)(addr & 0x3FFF);
+    if (on)      p |= 0x8000;
+    if (noReply) p |= 0x4000;
+    eventLog_note(GW_EV_COIL, unit, p);
+}
+
+// ---- periodic summaries ----------------------------------------------------
+#define HEAL_SUMMARY_MS 600000UL
+static uint32_t _healSeenOk   = 0;
+static uint32_t _healSeenFail = 0;
+static uint32_t _healAtMs     = 0;
+
+void eventLog_update() {
+    if (!_ok) return;
+    const uint32_t now = millis();
+    if (_coilDropped && now - _dropReportMs >= 60000UL) {
+        _dropReportMs = now;
+        eventLog_note(GW_EV_COIL_DROPPED, 0,
+                      (uint16_t)min(_coilDropped, 65535UL));
+        _coilDropped = 0;
+    }
+    if (now - _healAtMs >= HEAL_SUMMARY_MS) {
+        _healAtMs = now;
+        const uint32_t ok = rtu_retryOk(), fail = rtu_retryFail();
+        const uint32_t dOk = ok - _healSeenOk, dFail = fail - _healSeenFail;
+        _healSeenOk = ok;
+        _healSeenFail = fail;
+        if (dOk || dFail) {
+            eventLog_note(GW_EV_HEAL, (uint8_t)min(dFail, 255UL),
+                          (uint16_t)min(dOk, 65535UL));
+        }
+    }
+}
+
 bool     eventLog_ok()    { return _ok; }
 uint32_t eventLog_count() { return _nextSeq - 1; }
 
@@ -128,6 +199,10 @@ const char* eventLog_typeName(uint8_t type) {
         case GW_EV_FW:           return "fw_update";
         case GW_EV_BUS_QUIET:    return "bus_quiet";
         case GW_EV_OUT_FIXED:    return "out_fixed";
+        case GW_EV_TCP_PEER:     return "tcp_peer";
+        case GW_EV_COIL:         return "coil";
+        case GW_EV_COIL_DROPPED: return "coil_dropped";
+        case GW_EV_HEAL:         return "rtu_heal";
         default:                 return "unknown";
     }
 }

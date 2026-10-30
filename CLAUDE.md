@@ -90,6 +90,7 @@ $LGS PING | INFO | HELP | GET [key]
 $LGS LAMP <1-4|off> [ms]      # drive one relay output, for wiring checks
 $LGS TIME [epoch]             # read or set the wall clock (LOCAL seconds)
 $LGS LOG [n]                  # newest n event-log records (default 20, cap 100)
+$LGS LOG SINCE <seq> [n]      # records AFTER seq, oldest first (cap 100); #OK has next= gap= oldest= for a collector
 $LGS HELLO <who>              # arms a 120 s session — required before any write
 $LGS SET key=value ...        # staged only
 $LGS SAVE | DISCARD | DEFAULTS | REBOOT
@@ -107,6 +108,7 @@ The key table is **append-only**: `valueOf()`/`storeValue()` switch on the index
 
 ## Hard-won gotchas — do not regress
 
+- **The event log is what the Test Tool's collector reads (v1.14.0).** `LOG SINCE <seq>` returns records after `seq` oldest-first; `next=` is the seq to ask for next time, `gap=1` means records were overwritten before the collector came, `gap=2` means it remembers a seq this board never reached (log erased / board replaced). Client addresses are TWO records: `tcp_accept` (a=slot, p=last octet) then `tcp_peer` (a=octet 3, p=octet1<<8|octet2) -- keep them adjacent. `coil` (FC 5 through the TCP bridge, a=unit, p=addr|on<<15|no_reply<<14) is token-bucket rate limited (burst 120, 10/s sustained); suppressed ones are summed into one `coil_dropped` per minute. `rtu_heal` is a 10-minute summary, never one record per repair. Do not log reads or per-repair events: the ring is ~98k records and flash endurance is finite. Record layout is unchanged (16 B) on purpose -- widening it would orphan every deployed log.
 - **`sys.log` must never be persisted.** A unit shipped with logging on would corrupt the SMT host's binary Modbus stream forever. It resets to 0 every boot by design.
 - **The console magic is 5 bytes, `"$LGS "`.** A bare `$` is 0x24 = 36 = a real slave ID (row 3, col 6). The console only ever sees bytes `usb_bridge` already rejected as non-Modbus, and a valid RTU frame can never reach the parser — that ordering *is* the isolation, so never move the hook above the CRC gate.
 - **Hand-typed console lines arrive one byte at a time.** The frame accumulator returns after ~10 ms of silence, so `gw_console` keeps its own line state across calls. Do not "simplify" it back into the accumulator.

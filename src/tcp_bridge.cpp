@@ -60,6 +60,24 @@ void tcpBridge_clientDesc(char* out, size_t n) {
     if (at == 0) snprintf(out, n, "-");
 }
 
+// ── Event-log helpers (v1.14.0) ────────────────────────────────────────────
+// The second half of a client's address: TCP_ACCEPT / TCP_REFUSED carry only
+// the last octet, this carries the other three (see GW_EV_TCP_PEER).
+static void notePeerPrefix(const IPAddress& ip) {
+    eventLog_note(GW_EV_TCP_PEER, (uint8_t)ip[2],
+                  (uint16_t)(((uint16_t)ip[0] << 8) | ip[1]));
+}
+
+// A forwarded single-coil write (FC 5, 6-byte RTU body: unit fc addr(2)
+// value(2)): which unit, which coil, on or off. Any other function is not an
+// "event" -- reads would drown the log -- and goes by unrecorded.
+static void noteCoilWrite(const uint8_t* rtu, int len, bool noReply) {
+    if (len != 6 || rtu[1] != 0x05) return;
+    const uint16_t addr = (uint16_t)(((uint16_t)rtu[2] << 8) | rtu[3]);
+    const bool on = (rtu[4] == 0xFF);
+    eventLog_noteCoil(rtu[0], addr, on, noReply);
+}
+
 // ── One slot's request/response, at most one transaction per call ──────────
 static void serveSlot(int slot) {
     EthernetClient& cl = _client[slot];
@@ -162,6 +180,7 @@ static void serveSlot(int slot) {
 
     // ── Broadcast: forward and move on (no slave answers address 0) ───────
     if (rtu_buf[0] == 0x00) {
+        noteCoilWrite(rtu_buf, rtu_len, false);
         rtu_send(rtu_buf, rtu_len + 2);
         gwStatus_pulseRs485();
         LOG_SERIAL.println("[TCP] Broadcast forwarded — no reply expected.");
@@ -177,6 +196,7 @@ static void serveSlot(int slot) {
     int rx_len = rtu_transact(rtu_buf, rtu_len + 2, rx_buf, RTU_F_HEAL);
     gwStatus_pulseRs485();
     gwStatus_countRtu(rx_len > 0, millis() - t0);
+    noteCoilWrite(rtu_buf, rtu_len, rx_len == 0);
 
     if (rx_len == 0) {
         if (_excOn) {
@@ -241,6 +261,7 @@ void tcpBridge_update() {
             LOG_SERIAL.print("[NET] Refused connection from "); LOG_SERIAL.print(newClient.remoteIP());
             LOG_SERIAL.println(" — both client slots taken.");
             eventLog_note(GW_EV_TCP_REFUSED, 0, (uint16_t)newClient.remoteIP()[3]);
+            notePeerPrefix(newClient.remoteIP());
             newClient.stop();
         } else {
             _client[freeSlot] = newClient;
@@ -249,6 +270,7 @@ void tcpBridge_update() {
             LOG_SERIAL.print(":"); LOG_SERIAL.println(newClient.remotePort());
             eventLog_note(GW_EV_TCP_ACCEPT, (uint8_t)(freeSlot + 1),
                           (uint16_t)newClient.remoteIP()[3]);
+            notePeerPrefix(newClient.remoteIP());
         }
     }
 

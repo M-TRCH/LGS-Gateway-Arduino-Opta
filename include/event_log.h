@@ -47,9 +47,26 @@ enum GwEvent : uint8_t {
                              // A cabinet losing power looks exactly like this
                              // from here, and this is the only witness that
                              // survives with no PC watching.
-    GW_EV_OUT_FIXED    = 14  // a relay output had drifted from its commanded
+    GW_EV_OUT_FIXED    = 14, // a relay output had drifted from its commanded
                              // level and was re-asserted (aux = output 1-4,
                              // param = the level it was put back to)
+    // ---- v1.14.0: what a collector needs to answer "who did what" ----------
+    GW_EV_TCP_PEER     = 15, // companion of TCP_ACCEPT, written right after it:
+                             // the client's first three octets, so the pair
+                             // carries the whole address (a /24 last octet alone
+                             // is ambiguous behind a router): aux = octet 3,
+                             // param = octet 1 << 8 | octet 2
+    GW_EV_COIL         = 16, // a Modbus TCP client wrote a coil (FC 5) through
+                             // the bridge: aux = unit id (0 = broadcast),
+                             // param = coil address | on << 15 | no_reply << 14.
+                             // Addresses stay below 16384, so the flags are free.
+                             // Rate limited (see eventLog_noteCoil)
+    GW_EV_COIL_DROPPED = 17, // coil events suppressed by the rate limit since
+                             // the last one of these: param = count (clamped)
+    GW_EV_HEAL         = 18  // RS485 first-try misses the gateway repaired since
+                             // the last one of these (every 10 minutes, only when
+                             // there were any): param = repairs that worked,
+                             // aux = repairs that did not (clamped 255)
 };
 
 struct EventRecord {        // exactly 16 bytes on flash, written once
@@ -72,6 +89,21 @@ void eventLog_note(uint8_t type, uint8_t aux, uint16_t param);
 // Read the record `back` places behind the newest (0 = newest).
 // false = no such record (younger than the ring or before the beginning).
 bool eventLog_read(uint32_t back, EventRecord& out);
+
+// Oldest seq that can still be read (0 = log empty or off). Records before it
+// were overwritten; a collector asking for older ones is told about the gap.
+uint32_t eventLog_oldest();
+
+// A coil write seen on the TCP bridge. Rate limited: a sustained burst above
+// COIL_EV_PER_S (a pharmacy server lights thousands of windows a day, a
+// misbehaving client could do thousands a minute) is counted, not stored, and
+// summarised by one GW_EV_COIL_DROPPED per minute. Flash endurance and the
+// ring's depth are what this protects.
+void eventLog_noteCoil(uint8_t unit, uint16_t addr, bool on, bool noReply);
+
+// Housekeeping tick, from loop(): the minute-boundary drop summary and the
+// 10-minute heal summary. Cheap when nothing is due.
+void eventLog_update();
 
 bool        eventLog_ok();
 uint32_t    eventLog_count();           // events ever written (= newest seq)

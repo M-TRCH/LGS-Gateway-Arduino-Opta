@@ -117,6 +117,7 @@ void loop() {
     gwStatus_update();
     panel_update();
     sched_update();
+    eventLog_update();          // drop / heal summaries; free when nothing is due
 
     if (!_healthyMarked && millis() > HEALTHY_AFTER_MS) {
         gwStatus_markHealthy();

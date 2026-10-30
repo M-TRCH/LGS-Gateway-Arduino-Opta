@@ -228,9 +228,74 @@ static void doTime(char** argv, int argc) {
 // The USB CDC blocks while a connected host is not reading (a stalled
 // terminal mid-dump would otherwise ride out the watchdog), so the dog is
 // fed per line.
+static void emitEvent(const EventRecord& r) {
+    char when[24];
+    if (r.epoch) {
+        const time_t t = (time_t)r.epoch;
+        struct tm tmv;
+        gmtime_r(&t, &tmv);             // the clock holds wall time already
+        snprintf(when, sizeof(when), "%04d-%02d-%02dT%02d:%02d:%02d",
+                 tmv.tm_year + 1900, tmv.tm_mon + 1, tmv.tm_mday,
+                 tmv.tm_hour, tmv.tm_min, tmv.tm_sec);
+    } else {
+        snprintf(when, sizeof(when), "-");
+    }
+    emitf("#DATA i=%lu t=%s up=%lu ev=%s a=%u p=%u",
+          (unsigned long)r.seq, when, (unsigned long)r.uptimeS,
+          eventLog_typeName(r.type), (unsigned)r.aux, (unsigned)r.param);
+}
+
+// LOG SINCE <seq> [n]: the records AFTER seq, oldest first, at most n (default
+// and cap 100), for a collector that remembers the last seq it stored and asks
+// again later. `next` is the seq to pass the next time (the last one sent, or
+// seq itself when nothing is new); `gap=1` says records between seq and the
+// first one sent were overwritten before it came (a collector that was away
+// longer than the ring is deep).
+static void doLogSince(char** argv, int argc) {
+    const uint32_t since = (uint32_t)strtoul(argv[0], nullptr, 10);
+    uint32_t want = (argc >= 2) ? (uint32_t)strtoul(argv[1], nullptr, 10) : 100UL;
+    if (want < 1)   want = 1;
+    if (want > 100) want = 100;
+
+    const uint32_t newest = eventLog_count();
+    uint32_t next = since;
+    uint32_t shown = 0;
+    int gap = 0;
+    if (since > newest) {
+        // The collector remembers a seq this gateway has never reached: its
+        // log was erased or the board replaced. Say so and let it restart.
+        emitf("#OK LOG n=0 total=%lu next=%lu gap=2 oldest=%lu", (unsigned long)newest,
+              (unsigned long)newest, (unsigned long)eventLog_oldest());
+        return;
+    }
+    uint32_t seq = since + 1;
+    const uint32_t oldest = eventLog_oldest();
+    if (oldest > seq) { seq = oldest; gap = 1; }
+    EventRecord r;
+    while (seq <= newest && shown < want) {
+        if (!eventLog_read(newest - seq, r)) { seq++; gap = 1; continue; }
+        gwStatus_watchdogKick();
+        emitEvent(r);
+        next = r.seq;
+        seq = r.seq + 1;
+        shown++;
+    }
+    emitf("#OK LOG n=%lu total=%lu next=%lu gap=%d oldest=%lu", (unsigned long)shown,
+          (unsigned long)newest, (unsigned long)next, gap,
+          (unsigned long)eventLog_oldest());
+}
+
 static void doLog(char** argv, int argc) {
     if (!eventLog_ok()) {
         emit("#ERR LOG err=log_unavailable");
+        return;
+    }
+    if (argc >= 1 && strcasecmp(argv[0], "SINCE") == 0) {
+        if (argc < 2) {
+            emit("#ERR LOG err=usage want=SINCE_seq_[n]");
+            return;
+        }
+        doLogSince(argv + 1, argc - 1);
         return;
     }
     uint32_t want = (argc >= 1) ? (uint32_t)strtoul(argv[0], nullptr, 10) : 20UL;
@@ -242,20 +307,7 @@ static void doLog(char** argv, int argc) {
     for (uint32_t back = 0; back < want; back++) {
         if (!eventLog_read(back, r)) break;
         gwStatus_watchdogKick();
-        char when[24];
-        if (r.epoch) {
-            const time_t t = (time_t)r.epoch;
-            struct tm tmv;
-            gmtime_r(&t, &tmv);         // the clock holds wall time already
-            snprintf(when, sizeof(when), "%04d-%02d-%02dT%02d:%02d:%02d",
-                     tmv.tm_year + 1900, tmv.tm_mon + 1, tmv.tm_mday,
-                     tmv.tm_hour, tmv.tm_min, tmv.tm_sec);
-        } else {
-            snprintf(when, sizeof(when), "-");
-        }
-        emitf("#DATA i=%lu t=%s up=%lu ev=%s a=%u p=%u",
-              (unsigned long)r.seq, when, (unsigned long)r.uptimeS,
-              eventLog_typeName(r.type), (unsigned)r.aux, (unsigned)r.param);
+        emitEvent(r);
         shown++;
     }
     emitf("#OK LOG n=%lu total=%lu", (unsigned long)shown,

@@ -89,7 +89,6 @@ Edit over USB with `$LGS` lines (PuTTY at 115200 works; so does the Test Tool's 
 $LGS PING | INFO | HELP | GET [key]
 $LGS LAMP <1-4|off> [ms]      # drive one relay output, for wiring checks
 $LGS TIME [epoch]             # read or set the wall clock (LOCAL seconds)
-$LGS TIME OFF                # forget the clock (needs HELLO): the scheduled reset stops until it is set again; logs clock_set aux=4
 $LGS LOG [n]                  # newest n event-log records (default 20, cap 100)
 $LGS LOG SINCE <seq> [n]      # records AFTER seq, oldest first (cap 100); #OK has next= gap= oldest= for a collector
 $LGS HELLO <who>              # arms a 120 s session — required before any write
@@ -99,7 +98,7 @@ $LGS RESYNC [0|1]             # volatile: broadcast re-sync + one retry after a 
 $LGS EXC [0|1]                # volatile: answer an RS485 timeout with Modbus exception 0x0B at once (default 0)
 ```
 
-`LAMP`, `TIME` (reading and setting; `TIME OFF` needs HELLO) and `LOG` are deliberately **not** session-gated: none outlives its own timeout (LOG is read-only), and a clock that needs a session to correct is a clock that spends its life wrong. LOG kicks the watchdog per emitted line — the USB CDC blocks while a connected host is not reading, and a 100-line dump into a stalled terminal must not reset the gateway.
+`LAMP`, `TIME` and `LOG` are deliberately **not** session-gated: none outlives its own timeout (LOG is read-only), and a clock that needs a session to correct is a clock that spends its life wrong. LOG kicks the watchdog per emitted line — the USB CDC blocks while a connected host is not reading, and a 100-line dump into a stalled terminal must not reset the gateway.
 
 Every command answers with exactly one terminal `#OK ...` or `#ERR ...` line, optionally preceded by `#DATA` lines. Errors are machine-readable (`err=range key=… allowed=…`).
 

@@ -64,15 +64,6 @@ void sched_setTime(uint32_t epoch, TimeSource src) {
 
 bool sched_timeSet() { return _timeSet; }
 
-void sched_clearTime() {
-    if (!_timeSet) return;
-    // Logged first, while the clock can still stamp the record.
-    eventLog_note(GW_EV_CLOCK_SET, 4, 0);
-    _timeSet = false;
-    gwStatus_clockMarkValid(false);
-    forgetFirings();
-}
-
 uint32_t sched_now() {
     return _timeSet ? (uint32_t)time(nullptr) : 0;
 }

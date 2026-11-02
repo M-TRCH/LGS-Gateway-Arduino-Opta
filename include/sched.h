@@ -49,10 +49,6 @@ enum class TimeSource : uint8_t { TOOL, NTP, RESTORED };
 // Set the wall clock. `epoch` is seconds since 1970 in LOCAL time.
 void sched_setTime(uint32_t epoch, TimeSource src = TimeSource::TOOL);
 bool sched_timeSet();               // false until somebody sets it
-// Forget the clock: the schedule stops until it is set again. The RTC keeps
-// counting and the backup-domain marker is dropped, so a reboot does not
-// quietly restore it either.
-void sched_clearTime();
 uint32_t sched_now();               // 0 when unset
 
 // "2026-08-10 15:31:07", or "unset"

@@ -205,23 +205,13 @@ static void doLamp(char** argv, int argc) {
     emitf("#OK LAMP %s ms=%lu", argv[0], (unsigned long)ms);
 }
 
-// `TIME OFF` makes the gateway forget its clock, which stops the scheduled
-// reset until somebody sets it again. Needs a HELLO session: unlike setting,
-// it is a deliberate change nobody does by accident. A reachable net.ntp or a
-// Tool that syncs on connect will set the clock again by itself.
 // Read or set the wall clock. Setting is not gated on HELLO: the Opta loses
 // the time whenever it loses power, so the tool sets it the moment it
 // connects, and a clock that needs a session to correct is a clock that
 // spends its life wrong.
 static void doTime(char** argv, int argc) {
     char nowStr[24];
-    if (argc >= 1 && strcasecmp(argv[0], "OFF") == 0) {
-        if (!gwConsole_armed()) {
-            emit("#ERR TIME err=locked hint=HELLO");
-            return;
-        }
-        sched_clearTime();
-    } else if (argc >= 1) {
+    if (argc >= 1) {
         const uint32_t epoch = (uint32_t)strtoul(argv[0], nullptr, 10);
         if (epoch < 1600000000UL) {         // before 2020: not a wall clock
             emit("#ERR TIME err=range want=epoch_seconds_local");

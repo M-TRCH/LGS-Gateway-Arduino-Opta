@@ -163,6 +163,7 @@ def main():
     ap.add_argument("--mode", default="run", choices=["run", "picks", "status", "result", "abort"])
     ap.add_argument("--ids", default="", help="e.g. 11-14 (default: the whole cabinet)")
     ap.add_argument("--pick-ids", default="11-14,31-34", help="modules the picks mode drives through the bridge")
+    ap.add_argument("--pick-gap", type=float, default=12.0, help="seconds of rest between two modules' pick cycles")
     ap.add_argument("--extra", default="", help="extra START arguments, e.g. 'idle=3 group=4'")
     ap.add_argument("--n", type=int, default=0)
     ap.add_argument("--baseline-s", type=float, default=60.0)
@@ -184,7 +185,7 @@ def main():
             for part in args.pick_ids.split(","):
                 a, _, b = part.partition("-")
                 ids += list(range(int(a), int(b or a) + 1))
-            picker = Picker(args.host, ids, 1.0)
+            picker = Picker(args.host, ids, args.pick_gap)
             picker.start()
             print(f"baseline for {args.baseline_s:.0f} s ...")
             time.sleep(args.baseline_s)

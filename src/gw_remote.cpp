@@ -12,6 +12,7 @@
 #include "gw_config.h"
 #include "gw_console.h"
 #include "gw_status.h"
+#include "ota_runner.h"
 
 // ── Wire constants (see gw_remote.h for the full layout) ───────────────────
 #define SUB_CONSOLE_EXEC  0x01
@@ -143,6 +144,10 @@ enum FwState : uint8_t { FW_IDLE = 0, FW_RECEIVING = 1, FW_STAGED = 2, FW_ERROR 
 #define FWS_INCOMPLETE   8
 #define FWS_NOT_CAPABLE  9
 #define FWS_LIB_ERROR    10
+#define FWS_FULL         11
+#define FWS_BAD_NAME     12
+#define FWS_BUSY         13
+#define FWS_NOT_FOUND    14
 
 static FwState  _fwState = FW_IDLE;
 static uint32_t _fwSize, _fwCrc, _fwReceived;
@@ -218,6 +223,8 @@ static int doFwBegin(const uint8_t* body, int bodyLen, uint8_t* out) {
     if (bodyLen != 8) return exception(out, EXC_ILLEGAL_VALUE);
     if (!gwConsole_armed())
         return fwStatusResp(out, SUB_FW_BEGIN, FWS_LOCKED);
+    if (otaRunner_running())
+        return fwStatusResp(out, SUB_FW_BEGIN, FWS_BUSY);
     const uint32_t size = rdU32(body);
     const uint32_t crc  = rdU32(body + 4);
     if (size < FW_MIN_SIZE || size > FW_MAX_SIZE)
@@ -367,11 +374,8 @@ static int doFwAbort(uint8_t* out) {
 #define DP_IDLE_ABORT_MS  60000UL
 #define DP_MOUNT_IDLE_MS  10000UL
 
-#define FWS_FULL          11
-#define FWS_BAD_NAME      12
-#define FWS_BUSY          13
-#define FWS_NOT_FOUND     14
 
+static bool          _fsHold = false;       // the OTA runner keeps the mount while it runs
 static bool          _dpWriting = false;
 static FILE*         _dpFile = nullptr;
 static uint8_t       _dpSlot = 0;
@@ -451,6 +455,35 @@ static int dpStatus(uint8_t* out, uint8_t sub, uint8_t status, uint8_t extra) {
     out[2] = status;
     out[3] = extra;
     return 4;
+}
+
+bool gwRemote_fsMount() { return dpMount(); }
+void gwRemote_fsHold(bool hold) { _fsHold = hold; if (hold) _fsTouchMs = millis(); }
+
+int gwRemote_depotImage(uint8_t slot, uint8_t* buf, uint32_t cap, uint32_t& size, uint32_t& crc, char* name25, uint8_t& nameLen) {
+    if (slot >= DP_SLOTS || !dpMount()) return 3;
+    DpHdr h;
+    dpReadHdr(slot, h);
+    if (h.state != 2 || (_dpWriting && _dpSlot == slot)) return 1;
+    if (h.size > cap) return 2;
+    char path[24];
+    dpPath(slot, path);
+    FILE* f = fopen(path, "rb");
+    if (!f) return 3;
+    bool ok = fseek(f, DP_HDR, SEEK_SET) == 0;
+    uint32_t got = 0;
+    while (ok && got < h.size) {
+        const size_t n = fread(buf + got, 1, (h.size - got) > 4096 ? 4096 : (h.size - got), f);
+        if (n == 0) { ok = false; break; }
+        got += (uint32_t)n;
+        gwStatus_watchdogKick();
+    }
+    fclose(f);
+    if (!ok || got != h.size) return 3;
+    size = h.size; crc = h.crc; nameLen = h.nameLen;
+    memcpy(name25, h.name, h.nameLen);
+    name25[h.nameLen] = 0;
+    return 0;
 }
 
 static int doDepotBegin(const uint8_t* body, int bodyLen, uint8_t* out) {
@@ -721,6 +754,6 @@ void gwRemote_update() {
     if (_dpWriting && (millis() - _dpLastMs) > DP_IDLE_ABORT_MS) dpClose();
 
     // Let go of the shared mount once the depot has been idle for a while and no firmware stage needs it.
-    if (_fwFs && _fwState == FW_IDLE && !_dpWriting && (millis() - _fsTouchMs) > DP_MOUNT_IDLE_MS)
+    if (_fwFs && _fwState == FW_IDLE && !_dpWriting && !_fsHold && (millis() - _fsTouchMs) > DP_MOUNT_IDLE_MS)
         fwUnmount();
 }

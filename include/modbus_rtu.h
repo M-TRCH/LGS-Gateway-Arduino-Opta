@@ -86,4 +86,13 @@ void rtu_setHub(const uint8_t* map, uint8_t retry, uint16_t gapMs,
 // pre-TX flush.
 void rtu_send(const uint8_t* tx, int tx_len);
 
+// ── Who else is using the bus (for the background OTA runner, docs/design-gateway-ota.md) ──
+// Every caller except the OTA runner is "foreign": the USB bridge, the TCP bridge, the panel. The runner sets the flag around
+// its own frames so they never count.
+void     rtu_setOtaCaller(bool on);
+uint32_t rtu_msSinceForeign();          // ms since a foreign frame last used the bus; 0xFFFFFFFF = since boot, never
+uint32_t rtu_msSinceWrite(uint8_t id);  // ms since a foreign caller last WROTE (FC 5/6/15/16) to this unit; 0xFFFFFFFF = never
+uint8_t  rtu_hubLastChannel();          // the channel the hub was last left on (0 = none yet / not behind the hub)
+bool     rtu_hubSettled();              // the last channel change has finished settling
+
 #endif // MODBUS_RTU_H

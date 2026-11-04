@@ -72,6 +72,23 @@ static uint8_t hubChannelOf(uint8_t slaveId) {
     return _hubMap[row - 1];
 }
 
+// ── Foreign traffic (see modbus_rtu.h) ─────────────────────────────────────
+static bool     _otaCaller = false;
+static uint32_t _foreignAt = 0;                 // millis() of the last foreign use; 0 = never
+static uint32_t _writeAt[256] = {0};            // millis() of the last foreign write per unit; 0 = never
+
+static void noteForeign(const uint8_t* tx, int tx_len) {
+    if (_otaCaller) return;
+    const uint32_t t = millis() ? millis() : 1;
+    _foreignAt = t;
+    if (tx_len >= 2 && (tx[1] == 0x05 || tx[1] == 0x06 || tx[1] == 0x0F || tx[1] == 0x10)) _writeAt[tx[0]] = t;
+}
+void     rtu_setOtaCaller(bool on) { _otaCaller = on; }
+uint32_t rtu_msSinceForeign() { return _foreignAt ? (millis() - _foreignAt) : 0xFFFFFFFFUL; }
+uint32_t rtu_msSinceWrite(uint8_t id) { return _writeAt[id] ? (millis() - _writeAt[id]) : 0xFFFFFFFFUL; }
+uint8_t  rtu_hubLastChannel() { return _hubLastCh; }
+bool     rtu_hubSettled() { return (int32_t)(_hubReadyAt - millis()) <= 0; }
+
 // ── Debug ──────────────────────────────────────────────────────────────────
 void printHex(const char* label, const uint8_t* buf, int len) {
     if (!g_logEnabled) return;              // skip the loop entirely when quiet
@@ -110,6 +127,7 @@ bool verifyCRC(const uint8_t* buf, int len) {
 
 // ── RS485 Send-only (broadcast) ────────────────────────────────────────────
 void rtu_send(const uint8_t* tx, int tx_len) {
+    noteForeign(tx, tx_len);
     // Flush stale RX bytes before transmitting
     int flushed = 0;
     while (RS485.available() && flushed < RTU_BUF_SIZE) { RS485.read(); flushed++; }
@@ -253,8 +271,10 @@ static void noteBadReply(const uint8_t* tx, const uint8_t* rx, int n) {
 
 int rtu_transact(const uint8_t* tx, int tx_len, uint8_t* rx, uint8_t flags) {
     const uint32_t start = millis();
+    noteForeign(tx, tx_len);
     bool healable = false;
     int n = rtu_transact_core(tx, tx_len, rx, &healable);
+    noteForeign(tx, tx_len);            // the bus was in use until now, not only when the request began
     const bool valid = (tx_len > 0) && replyIsFor(tx, rx, n);
     if (valid)       markAlive(tx[0]);
     else if (n > 0)  noteBadReply(tx, rx, n);

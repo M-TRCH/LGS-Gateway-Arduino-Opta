@@ -48,4 +48,12 @@ int gwRemote_handle(const uint8_t* pdu, int pdu_len,
 // Call every loop(), like gwConsole_update().
 void gwRemote_update();
 
+// ── For the background OTA runner (ota_runner) ───────────────────────────
+// The OTA FAT partition is shared with the depot and the stored OTA results. gwRemote_fsMount() makes sure it is mounted
+// (and restarts the idle timer); gwRemote_fsHold(true) keeps it mounted until released.
+bool gwRemote_fsMount();
+void gwRemote_fsHold(bool hold);
+// Copy a complete depot image into `buf` (capacity `cap`). Returns 0 ok, 1 slot not complete, 2 too big, 3 storage error.
+int  gwRemote_depotImage(uint8_t slot, uint8_t* buf, uint32_t cap, uint32_t& size, uint32_t& crc, char* name25, uint8_t& nameLen);
+
 #endif // GW_REMOTE_H

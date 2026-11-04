@@ -24,4 +24,8 @@ void usbBridge_setFraming(uint16_t gapMs, uint16_t maxMs);
 // Call every loop() iteration.
 void usbBridge_update();
 
+// ms since a complete, CRC-valid Modbus frame last arrived on the USB port; 0xFFFFFFFF = none since boot. An SMT PC that owns
+// the port keeps this small; the background OTA runner refuses to start while it is.
+uint32_t usbBridge_msSinceFrame();
+
 #endif // USB_BRIDGE_H

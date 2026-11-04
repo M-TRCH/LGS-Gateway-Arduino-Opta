@@ -64,10 +64,18 @@ enum GwEvent : uint8_t {
                              // Rate limited (see eventLog_noteCoil)
     GW_EV_COIL_DROPPED = 17, // coil events suppressed by the rate limit since
                              // the last one of these: param = count (clamped)
-    GW_EV_HEAL         = 18  // RS485 first-try misses the gateway repaired since
+    GW_EV_HEAL         = 18, // RS485 first-try misses the gateway repaired since
                              // the last one of these (every 10 minutes, only when
                              // there were any): param = repairs that worked,
                              // aux = repairs that did not (clamped 255)
+    // ---- v1.15: the gateway runs the module OTA itself (ota_runner) --------
+    GW_EV_OTA          = 19  // aux = 1 started (param = modules) / 2 a group
+                             // staged (param = channel << 8 | modules verified)
+                             // / 3 a module left the session and goes round again
+                             // (param = id) / 4 a module applied (param = id << 8
+                             // | 1 if the firmware changed) / 5 finished ok /
+                             // 6 finished with failures (param = failed) /
+                             // 7 aborted (param = failed)
 };
 
 struct EventRecord {        // exactly 16 bytes on flash, written once

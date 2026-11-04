@@ -12,6 +12,9 @@ void usbBridge_setFraming(uint16_t gapMs, uint16_t maxMs) {
 }
 
 // ── Entry ──────────────────────────────────────────────────────────────────
+static uint32_t _lastUsbFrameMs = 0;
+uint32_t usbBridge_msSinceFrame() { return _lastUsbFrameMs ? (millis() - _lastUsbFrameMs) : 0xFFFFFFFFUL; }
+
 void usbBridge_begin() {
     while (Serial.available()) Serial.read();   // drop stale host bytes
 }
@@ -48,6 +51,7 @@ void usbBridge_update() {
         return;
     }
     gwStatus_count(GW_USB_OK);
+    _lastUsbFrameMs = millis() ? millis() : 1;
     printHex("USB TX->RS485", frame, len);
 
     // Broadcast (slave address 0, e.g. the OTA chunk stream): no slave ever

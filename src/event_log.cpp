@@ -203,6 +203,7 @@ const char* eventLog_typeName(uint8_t type) {
         case GW_EV_COIL:         return "coil";
         case GW_EV_COIL_DROPPED: return "coil_dropped";
         case GW_EV_HEAL:         return "rtu_heal";
+        case GW_EV_OTA:          return "ota";
         default:                 return "unknown";
     }
 }

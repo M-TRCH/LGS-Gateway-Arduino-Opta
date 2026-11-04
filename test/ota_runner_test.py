@@ -210,7 +210,10 @@ def main():
             picker.start()
             print(f"{time.strftime('%H:%M:%S')} streaming reached chunk {done_n}; keeping the bus busy for {args.storm_s:.0f} s")
             time.sleep(args.storm_s)
-            picker.phase = "after"
+            picker.stop.set()           # the bus goes quiet; the runner has to notice that its modules timed out and go round again
+            picker.join(10)
+            storm = picker
+            picker = None
         t0 = time.monotonic()
         final = wait_done(c)
         if picker:
@@ -218,6 +221,9 @@ def main():
             picker.join(5)
             print(f"update took {time.monotonic() - t0:.0f} s; picks through the bridge:")
             report(picker)
+        if args.mode == "storm":
+            print("picks through the bridge during the storm:")
+            report(storm)
         print(console(c, "OTA RESULT 0"))
         print("FINAL:", final.get("state"))
     c.close()

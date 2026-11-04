@@ -86,6 +86,27 @@ is unset (the record needs wall time), or the USB bridge has seen traffic in the
 - Tool UI: a card on the Firmware page to start on chosen cabinets, a status table polled from `OTA STATUS`, and a results
   view from `OTA RESULT`. Written after the firmware works on the bench.
 
+## Bench results (Chest-Std-11, 2026-11-04, build `ota_runner` v2)
+
+| Test | Result |
+|---|---|
+| Quiet run, 4 modules | staged, verified, applied, confirmed in 148 s; record and event log match |
+| Quiet run with picks every ~7 s through the bridge, 8 modules (same channel, plus another channel), `idle=3` | all 8 updated in 309 s; **108 picks, 0 failed**; median 109 ms (baseline 109 ms), p95 188 ms (172), max 297 ms (172): the cost is at most one chunk frame in flight |
+| Bus kept busy for 10 minutes mid-stream (past the 90 s session timeout), then quiet | the runner sat at chunk 104 for the whole storm, then finished the stream, found all 4 modules had timed out, **re-entered the group with the slow pacing by itself** and finished (`tries=1`) |
+| Apply deferral | modules written by a foreign caller were left VERIFIED until `apply_quiet` had passed, the rest were applied at once; the run ended `done_ok` |
+| `OTA ABORT` mid-stream | state `aborted`, record written, all four modules back to idle |
+| Gateway `REBOOT` mid-stream | after boot `OTA STATUS` reports `interrupted`, `OTA RESULT` shows the run, nothing is left half-applied (a gateway reset also power-cycles the cabinet's modules through the shelf relay) |
+
+Lessons from the runs that went into the code: (1) `apply_idle` defaulted to 20 s and starved forever behind a pick every 13 s;
+it now defaults to 5 s because it only protects that one module, which `apply_quiet` already guards. (2) With continuous traffic
+(a busy bus with no 5 s gap) the runner makes **no** progress by design; that is the requirement, and on a ward with about
+2,000 picks a day there are long gaps. If a site's server polls registers every few seconds, lower `idle`.
+(3) The raw QSPI strip above 15.5 MB is the WiFi firmware map, not free space, so results live on the FAT partition.
+
+Not tested: a multi-channel group order on a cabinet whose hub is busy with picks on another channel for a long time, 80-module
+cabinets, modules older than v3.5.2 (30 s session timeout: the keepalive and retry path should cover them, unproven), and the
+module OLED while a pick's display write arrives during the update.
+
 ## Test plan (Chest-Std-11, the bench cabinet)
 
 1. Quiet run: one group, one run, results file and event log match what happened.

@@ -35,7 +35,7 @@
 // ── Defaults (all overridable on START) ────────────────────────────────────
 #define DEF_IDLE_S        5             // bus quiet before the runner transmits
 #define DEF_GROUP         8
-#define DEF_APPLY_IDLE_S  20            // bus quiet before a module is rebooted
+#define DEF_APPLY_IDLE_S  5             // bus quiet before a module is rebooted (it only matters to THAT module, which apply_quiet guards)
 #define DEF_APPLY_QUIET_S 300           // nobody wrote to the module for this long
 #define RESYNC_EVERY      8             // the proven pacing: a pause every 8 chunks ...
 #define RESYNC_PAUSE_MS   600

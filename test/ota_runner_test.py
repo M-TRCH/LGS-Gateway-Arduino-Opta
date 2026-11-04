@@ -160,10 +160,11 @@ def report(picker):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--host", required=True)
-    ap.add_argument("--mode", default="run", choices=["run", "picks", "status", "result", "abort"])
+    ap.add_argument("--mode", default="run", choices=["run", "picks", "storm", "status", "result", "abort"])
     ap.add_argument("--ids", default="", help="e.g. 11-14 (default: the whole cabinet)")
     ap.add_argument("--pick-ids", default="11-14,31-34", help="modules the picks mode drives through the bridge")
     ap.add_argument("--pick-gap", type=float, default=12.0, help="seconds of rest between two modules' pick cycles")
+    ap.add_argument("--storm-s", type=float, default=130.0, help="storm mode: how long the bus is kept busy once streaming has begun")
     ap.add_argument("--extra", default="", help="extra START arguments, e.g. 'idle=3 group=4'")
     ap.add_argument("--n", type=int, default=0)
     ap.add_argument("--baseline-s", type=float, default=60.0)
@@ -192,6 +193,24 @@ def main():
             picker.phase = "during"
         if not start(c, args.ids, args.extra):
             sys.exit(1)
+        if args.mode == "storm":
+            # wait until the image is being streamed, then keep the bus busy for longer than the module session timeout (90 s)
+            while True:
+                kv, _ = status_line(c)
+                done_n = int((kv.get("chunk") or "0/0").split("/")[0])
+                if kv.get("phase") == "stream" and done_n >= 100:
+                    break
+                time.sleep(2)
+            ids = []
+            for part in args.pick_ids.split(","):
+                a, _, b = part.partition("-")
+                ids += list(range(int(a), int(b or a) + 1))
+            picker = Picker(args.host, ids, 0.05)
+            picker.phase = "storm"
+            picker.start()
+            print(f"{time.strftime('%H:%M:%S')} streaming reached chunk {done_n}; keeping the bus busy for {args.storm_s:.0f} s")
+            time.sleep(args.storm_s)
+            picker.phase = "after"
         t0 = time.monotonic()
         final = wait_done(c)
         if picker:

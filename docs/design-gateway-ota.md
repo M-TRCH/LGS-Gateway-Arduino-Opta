@@ -48,7 +48,7 @@ with the slow pacing; a group whose sessions keep dying while the bus is busy is
 its modules are recorded as `gave_up` and the run goes on.
 
 **Applying later, when it is safe.** Verified modules wait (no timeout). A module is applied only when the bus has been quiet
-for `apply_idle` (default 20 s) **and** nobody wrote to that module for `apply_quiet` (default 300 s: a lit slot waiting for a
+for `apply_idle` (default 5 s) **and** nobody wrote to that module for `apply_quiet` (default 300 s: a lit slot waiting for a
 confirm must not be rebooted). A pick that arrives while the module reboots is held up to the existing hub budget; after that
 it gets the normal timeout. This is the one window where a module cannot serve a request; it is ~5 s, per module, only when
 that module was idle.
@@ -70,7 +70,7 @@ never reboots a module that was recently written.
 ## Console verbs (USB or the unit 255 tunnel; START and ABORT need HELLO)
 
 ```
-$LGS OTA START slot=<0-3> [ids=11-18,21 | all] [idle=5] [group=8] [apply_idle=20] [apply_quiet=300]
+$LGS OTA START slot=<0-3> [ids=11-18,21 | all] [idle=5] [group=8] [apply_idle=5] [apply_quiet=300]
 $LGS OTA STATUS      state, group/channel, phase, chunk progress, counts staged / applied / failed, paused-for seconds
 $LGS OTA RESULT [n]  the stored run n (0 = latest, 1 = the one before), one #DATA line per module
 $LGS OTA ABORT       sends the module abort coil to the group in session, then stops; verified modules keep waiting

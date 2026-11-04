@@ -20,6 +20,17 @@
 //   0x13 FW_APPLY      req: -   resp: status u8 (sent BEFORE the reset fires)
 //   0x14 FW_ABORT      req: -   resp: status u8
 //
+// Depot: module firmware images kept on the OTA FAT partition (4 slots, <=128 KB each) so a laptop plugged straight into
+// this gateway can leave one behind and the Tool can read it back later (docs/design-module-depot.md). Never executed here.
+//   0x20 DEPOT_BEGIN   req: size u32 · crc32 u32 · name[1..24 of A-Za-z0-9._-]   resp: status u8 · slot u8
+//   0x21 DEPOT_DATA    req: offset u32 · data[1..240]   resp: status u8 · received u32 (CRC-checked on the last chunk)
+//   0x22 DEPOT_LIST    req: slot u8   resp: slot u8 · state u8 (0 empty / 1 incomplete / 2 complete) · size u32 ·
+//                                            crc32 u32 · name_len u8 · name
+//   0x23 DEPOT_READ    req: slot u8 · offset u32   resp: status u8 · len u8 · data[<=200]
+//   0x24 DEPOT_DELETE  req: slot u8   resp: status u8 · slot u8
+// BEGIN and DELETE need the armed HELLO session; LIST and READ do not. Status adds 11 full, 12 bad name, 13 busy
+// (a firmware stage is receiving), 14 not found.
+//
 // Errors are standard Modbus exceptions (FC|0x80): 01 = unknown sub, FC other
 // than 0x41, or net.console=0; 03 = malformed payload; 04 = the console
 // output buffer belongs to the other client slot.

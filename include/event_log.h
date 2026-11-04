@@ -40,7 +40,8 @@ enum GwEvent : uint8_t {
                             // a scheduled reset is event 9)
     GW_EV_STORE_ERASED = 11, // aux = 1 button-hold erase / 2 forced defaults
     GW_EV_FW           = 12, // network firmware update: aux = 1 stage begun /
-                             // 2 apply ok (reset follows) / 3 CRC mismatch,
+                             // 2 apply ok (reset follows) / 3 CRC mismatch /
+                             // 4 depot image stored / 5 depot image deleted,
                              // param = image size in KB
     GW_EV_BUS_QUIET    = 13, // the RS485 side went silent en masse (aux = 1)
                              // and came back (aux = 2, param = seconds down).

@@ -168,7 +168,10 @@ static void fwCloseFile() {
     if (_fwFile) { fclose(_fwFile); _fwFile = nullptr; }
 }
 
+static void dpClose();                  // the depot below shares this mount
+
 static void fwUnmount() {
+    dpClose();
     fwCloseFile();
     if (_fwFs)   { _fwFs->unmount(); delete _fwFs; _fwFs = nullptr; }
     if (_fwPart) { delete _fwPart; _fwPart = nullptr; }
@@ -340,6 +343,299 @@ static int doFwAbort(uint8_t* out) {
     return fwStatusResp(out, SUB_FW_ABORT, FWS_OK);
 }
 
+// ── Depot (subs 0x20-0x24) ─────────────────────────────────────────────────
+// Module firmware images kept on the same OTA FAT partition as UPDATE.BIN, so a laptop plugged straight into this Opta
+// can leave one behind and the Tool on the hospital server can read it back later and run the module OTA itself
+// (docs/design-module-depot.md). The gateway never executes or interprets these bytes: it stores, lists, returns and
+// deletes them. Four slots, one file each, /fs/MODDEPn.BIN = a 64-byte header, then the image:
+//   "LGSD" · flag u8 (0 = being written, 1 = complete and CRC-checked) · name_len u8 · name[24] · size u32 · crc32 u32
+// The flag is set only after a CRC pass over the bytes read back from flash, so a power cut or a dropped socket leaves
+// a slot that lists as incomplete and is never offered for reading.
+
+#define SUB_DEPOT_BEGIN   0x20
+#define SUB_DEPOT_DATA    0x21
+#define SUB_DEPOT_LIST    0x22
+#define SUB_DEPOT_READ    0x23
+#define SUB_DEPOT_DELETE  0x24
+
+#define DP_SLOTS          4
+#define DP_HDR            64
+#define DP_NAME_MAX       24
+#define DP_MIN_SIZE       1024UL
+#define DP_MAX_SIZE       (128UL * 1024UL)      // the module's own slot is 61,440 B
+#define DP_READ_MAX       200
+#define DP_IDLE_ABORT_MS  60000UL
+#define DP_MOUNT_IDLE_MS  10000UL
+
+#define FWS_FULL          11
+#define FWS_BAD_NAME      12
+#define FWS_BUSY          13
+#define FWS_NOT_FOUND     14
+
+static bool          _dpWriting = false;
+static FILE*         _dpFile = nullptr;
+static uint8_t       _dpSlot = 0;
+static uint32_t      _dpSize = 0, _dpCrc = 0, _dpReceived = 0, _dpRun = 0;
+static unsigned long _dpLastMs = 0;
+static unsigned long _fsTouchMs = 0;            // last depot use of the shared mount
+
+static void dpClose() {
+    if (_dpFile) { fclose(_dpFile); _dpFile = nullptr; }
+    _dpWriting = false;
+    _dpReceived = 0;
+}
+
+static void dpPath(uint8_t slot, char* p) {
+    snprintf(p, 24, "/fs/MODDEP%u.BIN", (unsigned)slot);
+}
+
+// The shared OTA-partition mount, taken on first use and let go again by gwRemote_update() when idle.
+static bool dpMount() {
+    if (!_fwFs && !fwMount()) return false;
+    _fsTouchMs = millis();
+    return true;
+}
+
+struct DpHdr {
+    uint8_t  state;                  // 0 empty / unreadable, 1 incomplete, 2 complete
+    uint8_t  nameLen;
+    char     name[DP_NAME_MAX];
+    uint32_t size, crc;
+};
+
+static void putU32(uint8_t* p, uint32_t v) {
+    p[0] = (uint8_t)(v >> 24); p[1] = (uint8_t)(v >> 16); p[2] = (uint8_t)(v >> 8); p[3] = (uint8_t)v;
+}
+
+static void dpReadHdr(uint8_t slot, DpHdr& h) {
+    memset(&h, 0, sizeof(h));
+    char path[24];
+    dpPath(slot, path);
+    FILE* f = fopen(path, "rb");
+    if (!f) return;
+    uint8_t b[DP_HDR];
+    const size_t n = fread(b, 1, DP_HDR, f);
+    fclose(f);
+    if (n != DP_HDR || memcmp(b, "LGSD", 4) != 0 || b[5] == 0 || b[5] > DP_NAME_MAX) return;
+    h.nameLen = b[5];
+    memcpy(h.name, b + 6, h.nameLen);
+    h.size = rdU32(b + 30);
+    h.crc  = rdU32(b + 34);
+    h.state = b[4] == 1 ? 2 : 1;
+}
+
+static bool nameOk(const uint8_t* p, int n) {
+    if (n < 1 || n > DP_NAME_MAX) return false;
+    for (int i = 0; i < n; i++) {
+        const uint8_t c = p[i];
+        if (!((c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+              c == '.' || c == '_' || c == '-'))
+            return false;
+    }
+    return true;
+}
+
+static int dpStatus(uint8_t* out, uint8_t sub, uint8_t status, uint8_t extra) {
+    out[0] = GW_REMOTE_FC;
+    out[1] = sub;
+    out[2] = status;
+    out[3] = extra;
+    return 4;
+}
+
+static int doDepotBegin(const uint8_t* body, int bodyLen, uint8_t* out) {
+    // req: size u32 · crc32 u32 · name[1..24]      resp: status u8 · slot u8
+    if (bodyLen < 9 || bodyLen > 8 + DP_NAME_MAX) return exception(out, EXC_ILLEGAL_VALUE);
+    if (!nameOk(body + 8, bodyLen - 8)) return dpStatus(out, SUB_DEPOT_BEGIN, FWS_BAD_NAME, 0);
+    if (!gwConsole_armed()) return dpStatus(out, SUB_DEPOT_BEGIN, FWS_LOCKED, 0);
+    const uint32_t size = rdU32(body), crc = rdU32(body + 4);
+    const int nameLen = bodyLen - 8;
+    if (size < DP_MIN_SIZE || size > DP_MAX_SIZE) return dpStatus(out, SUB_DEPOT_BEGIN, FWS_TOO_BIG, 0);
+    if (_fwState == FW_RECEIVING) return dpStatus(out, SUB_DEPOT_BEGIN, FWS_BUSY, 0);
+
+    dpClose();
+    if (!dpMount()) return dpStatus(out, SUB_DEPOT_BEGIN, FWS_STORAGE, 0);
+
+    // The slot already holding this name is replaced; otherwise the first slot that holds nothing readable.
+    int slot = -1;
+    for (int s = 0; s < DP_SLOTS && slot < 0; s++) {
+        DpHdr h;
+        dpReadHdr((uint8_t)s, h);
+        if (h.state && h.nameLen == nameLen && memcmp(h.name, body + 8, nameLen) == 0) slot = s;
+    }
+    for (int s = 0; s < DP_SLOTS && slot < 0; s++) {
+        DpHdr h;
+        dpReadHdr((uint8_t)s, h);
+        if (!h.state) slot = s;
+    }
+    if (slot < 0) return dpStatus(out, SUB_DEPOT_BEGIN, FWS_FULL, 0);
+
+    char path[24];
+    dpPath((uint8_t)slot, path);
+    _dpFile = fopen(path, "wb");
+    if (!_dpFile) return dpStatus(out, SUB_DEPOT_BEGIN, FWS_STORAGE, 0);
+    uint8_t hdr[DP_HDR];
+    memset(hdr, 0, sizeof(hdr));
+    memcpy(hdr, "LGSD", 4);
+    hdr[4] = 0;
+    hdr[5] = (uint8_t)nameLen;
+    memcpy(hdr + 6, body + 8, nameLen);
+    putU32(hdr + 30, size);
+    putU32(hdr + 34, crc);
+    if (fwrite(hdr, 1, DP_HDR, _dpFile) != DP_HDR) {
+        dpClose();
+        return dpStatus(out, SUB_DEPOT_BEGIN, FWS_STORAGE, 0);
+    }
+    _dpSlot = (uint8_t)slot;
+    _dpSize = size; _dpCrc = crc; _dpReceived = 0; _dpRun = 0;
+    _dpWriting = true;
+    _dpLastMs = millis();
+    gwConsole_refreshSession();
+    return dpStatus(out, SUB_DEPOT_BEGIN, FWS_OK, (uint8_t)slot);
+}
+
+// Close the file, check what is really on the flash against the announced CRC, and only then mark the slot complete.
+static uint8_t dpFinish() {
+    char path[24];
+    dpPath(_dpSlot, path);
+    fclose(_dpFile);
+    _dpFile = nullptr;
+    _dpWriting = false;
+
+    uint8_t status = FWS_OK;
+    FILE* f = fopen(path, "rb");
+    if (!f) return FWS_STORAGE;
+    static uint8_t block[4096];
+    if (fseek(f, DP_HDR, SEEK_SET) != 0) { fclose(f); return FWS_STORAGE; }
+    uint32_t crc = 0, total = 0;
+    size_t n;
+    while ((n = fread(block, 1, sizeof(block), f)) > 0) {
+        crc = crc32_step(crc, block, n);
+        total += n;
+        gwStatus_watchdogKick();
+    }
+    fclose(f);
+    if (total != _dpSize || crc != _dpCrc || _dpRun != _dpCrc) {
+        remove(path);                       // never leave a slot that looks like an image but is not one
+        return FWS_CRC_MISMATCH;
+    }
+    f = fopen(path, "r+b");
+    if (!f) return FWS_STORAGE;
+    if (fseek(f, 4, SEEK_SET) != 0 || fputc(1, f) == EOF) status = FWS_STORAGE;
+    fclose(f);
+    if (status == FWS_OK) eventLog_note(GW_EV_FW, 4, (uint16_t)(_dpSize >> 10));
+    return status;
+}
+
+static int doDepotData(const uint8_t* body, int bodyLen, uint8_t* out) {
+    // req: offset u32 · data[1..240]      resp: status u8 · received u32
+    if (bodyLen < 5) return exception(out, EXC_ILLEGAL_VALUE);
+    const uint32_t offset = rdU32(body);
+    const uint8_t* data = body + 4;
+    const int dataLen = bodyLen - 4;
+
+    uint8_t status = FWS_OK;
+    if (!_dpWriting || !_dpFile) {
+        status = FWS_NOT_STARTED;
+    } else if (offset != _dpReceived || _dpReceived + dataLen > _dpSize) {
+        status = FWS_SEQ_MISMATCH;          // received tells the tool where to resume
+    } else if (fwrite(data, 1, dataLen, _dpFile) != (size_t)dataLen) {
+        dpClose();
+        status = FWS_STORAGE;
+    } else {
+        _dpRun = crc32_step(_dpRun, data, dataLen);
+        _dpReceived += dataLen;
+        _dpLastMs = millis();
+        _fsTouchMs = _dpLastMs;
+        gwStatus_watchdogKick();
+        gwConsole_refreshSession();
+        if (_dpReceived == _dpSize) {
+            const uint32_t got = _dpReceived;
+            status = dpFinish();
+            _dpReceived = status == FWS_OK ? got : 0;
+        }
+    }
+    out[0] = GW_REMOTE_FC;
+    out[1] = SUB_DEPOT_DATA;
+    out[2] = status;
+    putU32(out + 3, _dpReceived);
+    return 7;
+}
+
+static int doDepotList(const uint8_t* body, int bodyLen, uint8_t* out) {
+    // req: slot u8      resp: slot u8 · state u8 (0 empty, 1 incomplete, 2 complete) · size u32 · crc32 u32 · name_len u8 · name
+    if (bodyLen != 1 || body[0] >= DP_SLOTS) return exception(out, EXC_ILLEGAL_VALUE);
+    if (!dpMount()) return exception(out, EXC_SERVER_FAILURE);
+    DpHdr h;
+    dpReadHdr(body[0], h);
+    out[0] = GW_REMOTE_FC;
+    out[1] = SUB_DEPOT_LIST;
+    out[2] = body[0];
+    out[3] = h.state;
+    putU32(out + 4, h.size);
+    putU32(out + 8, h.crc);
+    out[12] = h.nameLen;
+    memcpy(out + 13, h.name, h.nameLen);
+    return 13 + h.nameLen;
+}
+
+static int doDepotRead(const uint8_t* body, int bodyLen, uint8_t* out) {
+    // req: slot u8 · offset u32      resp: status u8 · len u8 · data[len <= 200]
+    if (bodyLen != 5 || body[0] >= DP_SLOTS) return exception(out, EXC_ILLEGAL_VALUE);
+    if (!dpMount()) return exception(out, EXC_SERVER_FAILURE);
+    DpHdr h;
+    dpReadHdr(body[0], h);
+    out[0] = GW_REMOTE_FC;
+    out[1] = SUB_DEPOT_READ;
+    out[2] = FWS_OK;
+    out[3] = 0;
+    if (h.state != 2 || (_dpWriting && _dpSlot == body[0])) {
+        out[2] = FWS_NOT_FOUND;
+        return 4;
+    }
+    const uint32_t off = rdU32(body + 1);
+    if (off >= h.size) return 4;
+    uint32_t len = h.size - off;
+    if (len > DP_READ_MAX) len = DP_READ_MAX;
+    char path[24];
+    dpPath(body[0], path);
+    FILE* f = fopen(path, "rb");
+    if (!f) { out[2] = FWS_STORAGE; return 4; }
+    size_t n = 0;
+    if (fseek(f, (long)(DP_HDR + off), SEEK_SET) == 0) n = fread(out + 4, 1, len, f);
+    fclose(f);
+    if (n != len) { out[2] = FWS_STORAGE; return 4; }
+    out[3] = (uint8_t)len;
+    return 4 + (int)len;
+}
+
+static int doDepotDelete(const uint8_t* body, int bodyLen, uint8_t* out) {
+    // req: slot u8      resp: status u8 · slot u8
+    if (bodyLen != 1 || body[0] >= DP_SLOTS) return exception(out, EXC_ILLEGAL_VALUE);
+    if (!gwConsole_armed()) return dpStatus(out, SUB_DEPOT_DELETE, FWS_LOCKED, body[0]);
+    if (!dpMount()) return dpStatus(out, SUB_DEPOT_DELETE, FWS_STORAGE, body[0]);
+    if (_dpWriting && _dpSlot == body[0]) dpClose();
+    DpHdr h;
+    dpReadHdr(body[0], h);
+    if (!h.state) return dpStatus(out, SUB_DEPOT_DELETE, FWS_NOT_FOUND, body[0]);
+    char path[24];
+    dpPath(body[0], path);
+    const bool ok = remove(path) == 0;
+    if (ok) eventLog_note(GW_EV_FW, 5, (uint16_t)(h.size >> 10));
+    return dpStatus(out, SUB_DEPOT_DELETE, ok ? FWS_OK : FWS_STORAGE, body[0]);
+}
+
+static int doDepot(uint8_t sub, const uint8_t* body, int bodyLen, uint8_t* out) {
+    switch (sub) {
+        case SUB_DEPOT_BEGIN:  return doDepotBegin(body, bodyLen, out);
+        case SUB_DEPOT_DATA:   return doDepotData(body, bodyLen, out);
+        case SUB_DEPOT_LIST:   return doDepotList(body, bodyLen, out);
+        case SUB_DEPOT_READ:   return doDepotRead(body, bodyLen, out);
+        case SUB_DEPOT_DELETE: return doDepotDelete(body, bodyLen, out);
+        default:               return exception(out, EXC_ILLEGAL_FUNCTION);
+    }
+}
+
 static int doFw(uint8_t sub, const uint8_t* body, int bodyLen,
                 uint8_t* out, int slot) {
     (void)slot;                 // FW state is global on purpose: one operator
@@ -372,6 +668,11 @@ int gwRemote_handle(const uint8_t* pdu, int pdu_len,
         case SUB_FW_STATUS:
         case SUB_FW_APPLY:
         case SUB_FW_ABORT:     return doFw(sub, body, bodyLen, out, slot);
+        case SUB_DEPOT_BEGIN:
+        case SUB_DEPOT_DATA:
+        case SUB_DEPOT_LIST:
+        case SUB_DEPOT_READ:
+        case SUB_DEPOT_DELETE: return doDepot(sub, body, bodyLen, out);
         default:               return exception(out, EXC_ILLEGAL_FUNCTION);
     }
 }
@@ -399,4 +700,12 @@ void gwRemote_update() {
         (millis() - _fwLastMs) > FW_IDLE_ABORT_MS) {
         fwReset(FW_IDLE);
     }
+
+    // A depot upload whose stream stopped: close the file. The slot stays flagged incomplete, so it is never offered for
+    // reading, and the next DEPOT_BEGIN reuses it.
+    if (_dpWriting && (millis() - _dpLastMs) > DP_IDLE_ABORT_MS) dpClose();
+
+    // Let go of the shared mount once the depot has been idle for a while and no firmware stage needs it.
+    if (_fwFs && _fwState == FW_IDLE && !_dpWriting && (millis() - _fsTouchMs) > DP_MOUNT_IDLE_MS)
+        fwUnmount();
 }

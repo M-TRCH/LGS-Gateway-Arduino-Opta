@@ -47,9 +47,16 @@ New subfunctions next to FW_* in `gw_remote` (same 207-byte PDU limit, same `net
 - No new `GwConfig` key, so no `GW_BLOB_SCHEMA` bump and no wiped settings.
 - Setup ordering is untouched (the depot lives in the TCP/console path, after step 7).
 
-### Risks to settle on the bench before relying on it
+### Bench results (Chest-Std-11, 2026-11-04)
 
-1. **Does the bootloader's APPLY leave other files in partition 2 alone?** The partition is FAT; `fwMount()` already
+- `test/depot_test.py` roundtrip and negative modes pass on the board: a 61,304 B image uploads in about 7 s and reads back
+  byte for byte in about 7 s; locked writes, bad names, size limits, sequence mismatch and a wrong CRC behave as specified.
+- **Risk 1 is settled**: an image deposited before a real gateway network update (the bootloader's copy of `UPDATE.BIN`) was
+  still there, complete and byte-identical, after it. Not yet tested: a power cut in the middle of an upload.
+
+### Risks (as written before the bench run)
+
+1. **Does the bootloader's APPLY leave other files in partition 2 alone?** (Yes, see the bench results.) The partition is FAT; `fwMount()` already
    formats it if it cannot mount. A format after a power cut, or a bootloader that cleans the partition, would erase the
    depot. Test: deposit an image, run a gateway network update, list again. If it does not survive, the depot must
    move (partition 4 is the Arduino PLC area, so avoid it) or the Tool must re-deposit after every gateway update.

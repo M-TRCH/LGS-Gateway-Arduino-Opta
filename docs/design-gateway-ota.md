@@ -35,6 +35,12 @@ arrives while it transmits waits at most one frame (a 128-byte chunk is ~170 ms 
   with one unicast read before the next chunk; the first frame after a crossing is lost by design and the bitmap repair
   re-sends it.
 
+**The hub is shared, and that is the one cost that cannot be designed away.** Chunks are broadcasts and a broadcast reaches only
+the channel the hub is parked on, so the runner re-parks on its group's channel (a unicast read, whose first frame the hub eats)
+after every foreign request that left the hub elsewhere. A pick for a *different* channel then pays the normal crossing to get
+there and back. The runner only re-parks after `idle` seconds of quiet, prefers the channel the hub is already on when it picks
+the next group, and works in long bursts on one channel, so the extra crossings are as few as they can be.
+
 **Staging in small groups.** Per hub channel, at most `group` modules (default 8) at a time, so most of a cabinet is never
 touched: unicast probe (firmware version), broadcast metadata, unicast ENTER to the group only, stream with the proven
 pacing (a pause every 8 chunks), bitmap + state repair, finalize, read state. A module that left the session is retried once

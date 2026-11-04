@@ -376,6 +376,8 @@ static bool          _dpWriting = false;
 static FILE*         _dpFile = nullptr;
 static uint8_t       _dpSlot = 0;
 static uint32_t      _dpSize = 0, _dpCrc = 0, _dpReceived = 0, _dpRun = 0;
+static char          _dpName[24];
+static uint8_t       _dpNameLen = 0;
 static unsigned long _dpLastMs = 0;
 static unsigned long _fsTouchMs = 0;            // last depot use of the shared mount
 
@@ -409,6 +411,14 @@ static void putU32(uint8_t* p, uint32_t v) {
 
 static void dpReadHdr(uint8_t slot, DpHdr& h) {
     memset(&h, 0, sizeof(h));
+    if (_dpWriting && slot == _dpSlot) {    // its header is still in the FILE buffer, not on the flash
+        h.state = 1;
+        h.nameLen = _dpNameLen;
+        memcpy(h.name, _dpName, _dpNameLen);
+        h.size = _dpSize;
+        h.crc = _dpCrc;
+        return;
+    }
     char path[24];
     dpPath(slot, path);
     FILE* f = fopen(path, "rb");
@@ -456,17 +466,20 @@ static int doDepotBegin(const uint8_t* body, int bodyLen, uint8_t* out) {
     dpClose();
     if (!dpMount()) return dpStatus(out, SUB_DEPOT_BEGIN, FWS_STORAGE, 0);
 
-    // The slot already holding this name is replaced; otherwise the first slot that holds nothing readable.
+    // The slot already holding this name is replaced; otherwise an empty one, then one whose upload never finished.
+    // A complete image of another name is never taken.
     int slot = -1;
     for (int s = 0; s < DP_SLOTS && slot < 0; s++) {
         DpHdr h;
         dpReadHdr((uint8_t)s, h);
         if (h.state && h.nameLen == nameLen && memcmp(h.name, body + 8, nameLen) == 0) slot = s;
     }
-    for (int s = 0; s < DP_SLOTS && slot < 0; s++) {
-        DpHdr h;
-        dpReadHdr((uint8_t)s, h);
-        if (!h.state) slot = s;
+    for (int want = 0; want <= 1 && slot < 0; want++) {
+        for (int s = 0; s < DP_SLOTS && slot < 0; s++) {
+            DpHdr h;
+            dpReadHdr((uint8_t)s, h);
+            if (h.state == want) slot = s;
+        }
     }
     if (slot < 0) return dpStatus(out, SUB_DEPOT_BEGIN, FWS_FULL, 0);
 
@@ -488,6 +501,8 @@ static int doDepotBegin(const uint8_t* body, int bodyLen, uint8_t* out) {
     }
     _dpSlot = (uint8_t)slot;
     _dpSize = size; _dpCrc = crc; _dpReceived = 0; _dpRun = 0;
+    _dpNameLen = (uint8_t)nameLen;
+    memcpy(_dpName, body + 8, nameLen);
     _dpWriting = true;
     _dpLastMs = millis();
     gwConsole_refreshSession();

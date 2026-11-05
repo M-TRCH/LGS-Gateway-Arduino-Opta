@@ -68,7 +68,7 @@ enum GwEvent : uint8_t {
                              // the last one of these (every 10 minutes, only when
                              // there were any): param = repairs that worked,
                              // aux = repairs that did not (clamped 255)
-    // ---- v1.15: the gateway runs the module OTA itself (ota_runner) --------
+    // ---- v1.14.0: the gateway runs the module OTA itself (ota_runner) ------
     GW_EV_OTA          = 19  // aux = 1 started (param = modules) / 2 a group
                              // staged (param = channel << 8 | modules verified)
                              // / 3 a module left the session and goes round again

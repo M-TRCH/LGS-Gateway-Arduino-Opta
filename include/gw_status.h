@@ -78,6 +78,18 @@ bool           gwStatus_macValid();
 void           gwStatus_setMac(const uint8_t* mac);   // adopt the interface's
 void           gwStatus_serialHex(char* out, size_t n);
 
+// The OTP board info (variant opta_info.h), cached by gwStatus_begin() with the MAC. Only the Opta WiFi (AFX00002) has
+// the radio; a board whose OTP does not carry the 0xB5 magic reports otpValid() false and hasWifi() false.
+bool           gwStatus_otpValid();
+uint16_t       gwStatus_boardFunc();       // bit0 wifi, bit1 rs485, bit2 ethernet
+uint16_t       gwStatus_boardPid();
+bool           gwStatus_hasWifi();
+
+// Stretch the IWDG to its ~32.7 s ceiling around a call that can block for seconds (the Wi-Fi driver's start), then put
+// the configured period back. PR/RLR are writable while the IWDG runs; only stopping it is impossible.
+void           gwStatus_watchdogStretch();
+void           gwStatus_watchdogRestore();
+
 // Raw level of the on-board button, so its polarity can be measured on the
 // bench (reported as sys.btn) before any logic depends on it.
 int gwStatus_buttonRaw();

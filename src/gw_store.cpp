@@ -142,6 +142,19 @@ bool gwStore_save(const GwConfig& in) {
     return true;
 }
 
+bool gwStore_auxGet(const char* key, void* buf, size_t cap, size_t* len) {
+    if (!_ready && gwStore_begin() != GwStoreStatus::OK) return false;
+    size_t actual = 0;
+    if (_store->get(key, buf, cap, &actual) != MBED_SUCCESS) return false;
+    if (len) *len = actual;
+    return true;
+}
+
+bool gwStore_auxSet(const char* key, const void* data, size_t len) {
+    if (!_ready && gwStore_begin() != GwStoreStatus::OK) return false;
+    return _store->set(key, data, len, 0) == MBED_SUCCESS;
+}
+
 bool gwStore_erase() {
     if (!_ready) return false;
     int rc = _store->remove(GW_KEY);

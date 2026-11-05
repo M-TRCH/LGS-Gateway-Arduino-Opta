@@ -3,6 +3,9 @@
 #include "event_log.h"
 
 #include <stm32h7xx_hal.h>
+#include "opta_info.h"
+
+extern uint8_t* boardInfo();                // variant.cpp: the OTP copy, or a raw flash pointer when the magic misses
 #include <drivers/Watchdog.h>
 
 // The variant already owns an RTC handle and uses RTC_BKP_DR0 as the
@@ -34,6 +37,8 @@ static bool     _macValid;
 static uint32_t _lastRs485Ms = 0;
 static unsigned long _rs485PulseUntil;
 static uint16_t _wdtMs = 0;         // 0 until the watchdog is actually running
+static bool     _otpValid = false;
+static uint16_t _boardFunc = 0, _boardPid = 0;
 
 // ── Watchdog ───────────────────────────────────────────────────────────────
 void gwStatus_watchdogBegin(uint16_t ms) {
@@ -53,6 +58,32 @@ void gwStatus_watchdogKick() {
 }
 
 uint16_t gwStatus_watchdogMs() { return _wdtMs; }
+
+void gwStatus_watchdogStretch() {
+    if (!_wdtMs) return;
+    IWDG1->KR  = 0x5555;                    // unlock PR/RLR
+    IWDG1->PR  = 7;                         // LSI/256: ~32.7 s ceiling
+    IWDG1->RLR = 0x0FFF;
+    while (IWDG1->SR & (IWDG_SR_PVU | IWDG_SR_RVU)) {}
+    IWDG1->KR  = 0xAAAA;                    // reload with the new period
+}
+
+void gwStatus_watchdogRestore() {
+    if (!_wdtMs) return;
+    // LSI ~32 kHz: ticks = ms * 32 / (4 << PR). The smallest prescaler whose reload fits 12 bits, as mbed's start() picks.
+    uint32_t pr = 0, rlr = 0;
+    for (pr = 0; pr <= 6; pr++) {
+        rlr = ((uint32_t)_wdtMs * 32UL) / (4UL << pr);
+        if (rlr <= 0x0FFF) break;
+    }
+    if (rlr > 0x0FFF) rlr = 0x0FFF;
+    if (rlr == 0) rlr = 1;
+    IWDG1->KR  = 0x5555;
+    IWDG1->PR  = pr;
+    IWDG1->RLR = rlr - 1;
+    while (IWDG1->SR & (IWDG_SR_PVU | IWDG_SR_RVU)) {}
+    IWDG1->KR  = 0xAAAA;
+}
 
 // A unicast address that is neither all-zero nor all-ones. Enough to tell a
 // real OTP address from whatever happened to be at the fallback flash offset.
@@ -136,6 +167,11 @@ void gwStatus_begin() {
     // flag, and when the OTP magic does not match it copies from a raw flash
     // pointer instead — so the bytes are the only thing worth trusting.
     _macValid = (_getSecureEthMac_(_mac) == 6) && macLooksReal(_mac);
+    {
+        const OptaBoardInfo* bi = (const OptaBoardInfo*)boardInfo();
+        _otpValid = bi && bi->magic == OTP_QSPI_MAGIC;
+        if (_otpValid) { _boardFunc = bi->board_functionalities; _boardPid = bi->pid; }
+    }
     if (!_macValid) {
         static const uint8_t fallback[6] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
         memcpy(_mac, fallback, sizeof(_mac));
@@ -240,6 +276,10 @@ uint32_t    gwStatus_lastRs485Ms() { return _lastRs485Ms; }
 // ── Identity ───────────────────────────────────────────────────────────────
 const uint8_t* gwStatus_mac()  { return _mac; }
 bool           gwStatus_macValid() { return _macValid; }
+bool           gwStatus_otpValid() { return _otpValid; }
+uint16_t       gwStatus_boardFunc() { return _boardFunc; }
+uint16_t       gwStatus_boardPid() { return _boardPid; }
+bool           gwStatus_hasWifi() { return _otpValid && (_boardFunc & 0x01); }
 
 void gwStatus_setMac(const uint8_t* mac) {
     if (!mac || !macLooksReal(mac)) return;

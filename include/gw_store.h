@@ -30,6 +30,11 @@ GwStoreStatus gwStore_load(GwConfig& out);
 bool          gwStore_save(const GwConfig& in);
 bool          gwStore_erase();
 
+// A second key in the same TDBStore, beside the config blob (the service AP's password lives here, so GwConfig and its
+// schema never change for it). Not removed by gwStore_erase().
+bool          gwStore_auxGet(const char* key, void* buf, size_t cap, size_t* len);
+bool          gwStore_auxSet(const char* key, const void* data, size_t len);
+
 bool        gwStore_available();
 const char* gwStore_lastError();
 

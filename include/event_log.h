@@ -69,13 +69,20 @@ enum GwEvent : uint8_t {
                              // there were any): param = repairs that worked,
                              // aux = repairs that did not (clamped 255)
     // ---- v1.14.0: the gateway runs the module OTA itself (ota_runner) ------
-    GW_EV_OTA          = 19  // aux = 1 started (param = modules) / 2 a group
+    GW_EV_OTA          = 19, // aux = 1 started (param = modules) / 2 a group
                              // staged (param = channel << 8 | modules verified)
                              // / 3 a module left the session and goes round again
                              // (param = id) / 4 a module applied (param = id << 8
                              // | 1 if the firmware changed) / 5 finished ok /
                              // 6 finished with failures (param = failed) /
                              // 7 aborted (param = failed)
+    // ---- v1.15.0: the service access point (wifi_ap) ----------------------
+    GW_EV_AP           = 20, // aux = 1 on (param = 1 console / 2 panel) / 2 off
+                             // (param = minutes up) / 3 start failed (param =
+                             // driver status) / 4 refused (no radio, no radio
+                             // firmware or no password)
+    GW_EV_WIFI_FW      = 21  // radio firmware file installed over the network:
+                             // aux = 1 ok / 2 CRC mismatch, param = size in KB
 };
 
 struct EventRecord {        // exactly 16 bytes on flash, written once

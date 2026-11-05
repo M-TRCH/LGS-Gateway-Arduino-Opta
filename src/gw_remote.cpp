@@ -13,6 +13,7 @@
 #include "gw_console.h"
 #include "gw_status.h"
 #include "ota_runner.h"
+#include "wifi_ap.h"
 
 // ── Wire constants (see gw_remote.h for the full layout) ───────────────────
 #define SUB_CONSOLE_EXEC  0x01
@@ -500,7 +501,7 @@ static int doDepotBegin(const uint8_t* body, int bodyLen, uint8_t* out) {
     const uint32_t size = rdU32(body), crc = rdU32(body + 4);
     const int nameLen = bodyLen - 8;
     if (size < DP_MIN_SIZE || size > DP_MAX_SIZE) return dpStatus(out, SUB_DEPOT_BEGIN, FWS_TOO_BIG, 0);
-    if (_fwState == FW_RECEIVING) return dpStatus(out, SUB_DEPOT_BEGIN, FWS_BUSY, 0);
+    if (_fwState == FW_RECEIVING || wifiAp_fwReceiving()) return dpStatus(out, SUB_DEPOT_BEGIN, FWS_BUSY, 0);
 
     dpClose();
     if (!dpMount()) return dpStatus(out, SUB_DEPOT_BEGIN, FWS_STORAGE, 0);
@@ -679,6 +680,41 @@ static int doDepotDelete(const uint8_t* body, int bodyLen, uint8_t* out) {
     return dpStatus(out, SUB_DEPOT_DELETE, ok ? FWS_OK : FWS_STORAGE, body[0]);
 }
 
+// ── Radio firmware file (subs 0x30-0x32), Opta WiFi only ───────────────────
+// Writes /wlan/4343WA1.BIN on partition 1 so the service AP can start; see wifi_ap.cpp. Never the raw 14-16 MB strip.
+#define SUB_WIFI_FW_BEGIN  0x30
+#define SUB_WIFI_FW_DATA   0x31
+#define SUB_WIFI_FW_STATUS 0x32
+
+static int doWifiFw(uint8_t sub, const uint8_t* body, int bodyLen, uint8_t* out) {
+    out[0] = GW_REMOTE_FC;
+    out[1] = sub;
+    if (sub == SUB_WIFI_FW_BEGIN) {                 // req: size u32 · crc32 u32   resp: status u8
+        if (bodyLen != 8) return exception(out, EXC_ILLEGAL_VALUE);
+        if (!gwConsole_armed()) { out[2] = FWS_LOCKED; return 3; }
+        if (_fwState == FW_RECEIVING || _dpWriting) { out[2] = FWS_BUSY; return 3; }
+        out[2] = wifiAp_fwBegin(rdU32(body), rdU32(body + 4));
+        if (out[2] == FWS_OK) gwConsole_refreshSession();
+        return 3;
+    }
+    if (sub == SUB_WIFI_FW_DATA) {                  // req: offset u32 · data[1..240]   resp: status u8 · received u32
+        if (bodyLen < 5) return exception(out, EXC_ILLEGAL_VALUE);
+        uint32_t got = 0;
+        out[2] = wifiAp_fwData(rdU32(body), body + 4, bodyLen - 4, got);
+        if (out[2] == FWS_OK) gwConsole_refreshSession();
+        putU32(out + 3, got);
+        return 7;
+    }
+    // STATUS   resp: receiving u8 · received u32 · state_len u8 · state
+    const char* st = wifiAp_fwState();
+    const uint8_t n = (uint8_t)strlen(st);
+    out[2] = wifiAp_fwReceiving() ? 1 : 0;
+    putU32(out + 3, wifiAp_fwReceived());
+    out[7] = n;
+    memcpy(out + 8, st, n);
+    return 8 + n;
+}
+
 static int doDepot(uint8_t sub, const uint8_t* body, int bodyLen, uint8_t* out) {
     switch (sub) {
         case SUB_DEPOT_BEGIN:  return doDepotBegin(body, bodyLen, out);
@@ -727,6 +763,9 @@ int gwRemote_handle(const uint8_t* pdu, int pdu_len,
         case SUB_DEPOT_LIST:
         case SUB_DEPOT_READ:
         case SUB_DEPOT_DELETE: return doDepot(sub, body, bodyLen, out);
+        case SUB_WIFI_FW_BEGIN:
+        case SUB_WIFI_FW_DATA:
+        case SUB_WIFI_FW_STATUS: return doWifiFw(sub, body, bodyLen, out);
         default:               return exception(out, EXC_ILLEGAL_FUNCTION);
     }
 }

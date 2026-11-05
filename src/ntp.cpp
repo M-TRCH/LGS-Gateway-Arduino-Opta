@@ -6,8 +6,9 @@
 #include "gw_status.h"
 #include "net_runtime.h"
 #include "sched.h"
+#include "wifi_ap.h"
 
-enum class NtpState : uint8_t { OFF, WAITING_LINK, SYNCING, OK, FAILED };
+enum class NtpState : uint8_t { OFF, WAITING_LINK, SYNCING, OK, FAILED, PAUSED };
 
 static NtpState     _state = NtpState::OFF;
 static EthernetUDP* _udp = nullptr;         // exists only while a query is out
@@ -47,6 +48,12 @@ void ntp_update() {
     if (c.net_ntp == 0) {
         if (_waiting) closeQuery();
         _state = NtpState::OFF;
+        return;
+    }
+    if (wifiAp_isUp()) {
+        // The service AP's DHCP server holds the fourth lwIP socket: no query until it is off again.
+        if (_waiting) closeQuery();
+        _state = NtpState::PAUSED;
         return;
     }
     if (!netRuntime_isUp()) {
@@ -118,6 +125,7 @@ const char* ntp_stateName() {
         case NtpState::SYNCING:      return "syncing";
         case NtpState::OK:           return "ok";
         case NtpState::FAILED:       return "failed";
+        case NtpState::PAUSED:       return "paused";
         case NtpState::OFF: default: return "off";
     }
 }

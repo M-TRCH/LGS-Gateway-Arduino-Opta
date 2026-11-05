@@ -204,6 +204,8 @@ const char* eventLog_typeName(uint8_t type) {
         case GW_EV_COIL_DROPPED: return "coil_dropped";
         case GW_EV_HEAL:         return "rtu_heal";
         case GW_EV_OTA:          return "ota";
+        case GW_EV_AP:           return "service_ap";
+        case GW_EV_WIFI_FW:      return "wifi_fw";
         default:                 return "unknown";
     }
 }

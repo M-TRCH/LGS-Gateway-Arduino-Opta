@@ -4,6 +4,7 @@
 #include "gw_status.h"
 #include "gw_store.h"
 #include "net_runtime.h"
+#include "ota_runner.h"
 #include "tcp_bridge.h"
 
 // Inputs 1-5 on the Opta terminal block. Red, green, blue, yellow, white in
@@ -341,11 +342,15 @@ static void lampUpdate(uint32_t now) {
         for (uint8_t i = 0; i < PANEL_OUTPUTS; i++) _outSince[i] = 0;
     }
     const uint8_t state = gatewayState(now);
+    const bool otaOn = otaRunner_running();
     for (uint8_t i = 0; i < PANEL_OUTPUTS; i++) {
         // The shelf's power keeps running even when the lamps are switched
         // off — that switch is about lamps, not about the cabinet.
         if (!_lampsOn && !isShelf(i)) continue;
-        const bool want = sourceTrue(_outSrc[i], state);
+        // A module firmware update is running: every status lamp stays lit, so
+        // anyone at the cabinet can see it must not be switched off or touched.
+        // The shelf's power is never a lamp and follows its own source.
+        const bool want = (otaOn && !isShelf(i)) ? true : sourceTrue(_outSrc[i], state);
         if (want == (bool)_outLit[i]) continue;
         // Relays, not LEDs: never switch a LAMP faster than the dwell. The
         // shelf's power is exempt — a reset must start and end on time.

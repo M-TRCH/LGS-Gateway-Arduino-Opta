@@ -53,6 +53,17 @@ confirm must not be rebooted). A pick that arrives while the module reboots is h
 it gets the normal timeout. This is the one window where a module cannot serve a request; it is ~5 s, per module, only when
 that module was idle.
 
+**Rhythm-aware apply (v1.14.0).** `modbus_rtu` learns, per unit, when a foreign master last asked it (an "episode" is a burst
+of requests closer than 2 s; the period is the distance between the last two episode starts, ignored above 10 min). A module
+is applied only if `rtu_msUntilNextTouch(id)` is at least `APPLY_WINDOW_MS` (8 s): it is rebooted right after its turn in the
+poll, not just before the next one. No known rhythm means nothing to wait for; a poller silent for more than two periods is
+treated as gone; an overdue one counts as "may come any moment" and defers the apply. Broadcasts touch nobody.
+
+**Front-panel lamps.** While `otaRunner_running()`, `panel.cpp` keeps every non-shelf output lit (the three status lamps), so
+anyone at the cabinet can see an update is in progress. It deliberately wins over the lamps' normal sources and over foreign
+traffic; only `$LGS LAMP` (a timed force) overrides it, and the lamps return when the force expires. The shelf's power is never
+touched. Bench (Chest-Std-11): `INFO panel.lamp` reads `1234` during a run, `forced:12--` during `LAMP 2 4000`, `1234` after.
+
 **Not promised:** literally zero impact. A pick can land during a module's 0.7 s staging erase or its 5 s reboot, and the
 OLED shows the update face while a module is receiving. The design makes both rare and short, never blocks a request, and
 never reboots a module that was recently written.

@@ -9,6 +9,7 @@
 #include "gw_status.h"
 #include "gw_store.h"
 #include "net_runtime.h"
+#include "ota_runner.h"
 #include "ntp.h"
 #include "tcp_bridge.h"
 #include "panel.h"
@@ -89,6 +90,7 @@ void setup() {
     sched_begin();
     usbBridge_begin();
     gwConsole_begin();
+    otaRunner_begin();
     digitalWrite(USB_MODE_LED_PIN, HIGH);
 
     // Optional, and deliberately last: the worst a missing cable or a wrong
@@ -113,10 +115,12 @@ void loop() {
     gwRemote_update();          // post-APPLY reset + stalled-upload timeout
     netRuntime_update();
     if (netRuntime_isUp()) tcpBridge_update();
+    otaRunner_update();         // after the bridges: anything they had to do has already been done
     ntp_update();               // checks enabled/link state itself
     gwStatus_update();
     panel_update();
     sched_update();
+    eventLog_update();          // drop / heal summaries; free when nothing is due
 
     if (!_healthyMarked && millis() > HEALTHY_AFTER_MS) {
         gwStatus_markHealthy();

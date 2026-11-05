@@ -123,10 +123,9 @@ static uint8_t  _round = 0, _sub = 0;
 static uint8_t  _missing[MAX_CHUNKS / 8];
 static uint16_t _repairList[MAX_CHUNKS];
 static uint16_t _repairN = 0;
-static bool     _anyComplete[MAX_GROUP];
 static uint8_t  _applyIdx = 0;
 static uint8_t  _confirmTry = 0;
-static uint32_t _restarts = 0, _lastSeen = 0;
+static uint32_t _restarts = 0;
 
 // the record
 static uint32_t _seq = 0, _startEpoch = 0, _endEpoch = 0;
@@ -189,14 +188,6 @@ static uint16_t crc16ccitt(const uint8_t* p, int n) {
         for (int i = 0; i < 8; i++) crc = (crc & 0x8000) ? (uint16_t)((crc << 1) ^ 0x1021) : (uint16_t)(crc << 1);
     }
     return crc;
-}
-static uint32_t crc32_(uint32_t crc, const uint8_t* p, size_t n) {
-    crc = ~crc;
-    while (n--) {
-        crc ^= *p++;
-        for (int k = 0; k < 8; k++) crc = (crc >> 1) ^ (0xEDB88320UL & (0UL - (crc & 1)));
-    }
-    return ~crc;
 }
 
 static void sendChunk(uint16_t idx) {
@@ -270,11 +261,11 @@ static bool writeRecord(uint8_t state) {
     if (!f) { _lastWriteOk = 0; return false; }
     uint32_t crc = 0;
     bool ok = fwrite(&h, 1, sizeof(h), f) == sizeof(h);
-    crc = crc32_(crc, (const uint8_t*)&h, sizeof(h));
+    crc = gwRemote_crc32(crc, (const uint8_t*)&h, sizeof(h));
     for (int i = 0; ok && i < _nMods; i++) {
         ResMod r = {_mods[i].id, _mods[i].st, _mods[i].err, _mods[i].tries, _mods[i].fwBefore, _mods[i].fwAfter};
         ok = fwrite(&r, 1, sizeof(r), f) == sizeof(r);
-        crc = crc32_(crc, (const uint8_t*)&r, sizeof(r));
+        crc = gwRemote_crc32(crc, (const uint8_t*)&r, sizeof(r));
     }
     if (ok) ok = fwrite(&crc, 1, 4, f) == 4;
     fclose(f);
@@ -292,12 +283,12 @@ static bool readRecord(int n, ResHdr& h, ResMod* rows) {
         if (!f) continue;
         ResHdr hh;
         if (fread(&hh, 1, sizeof(hh), f) == sizeof(hh) && memcmp(hh.magic, "LGOR", 4) == 0 && hh.count <= MAX_MODS) {
-            uint32_t crc = crc32_(0, (const uint8_t*)&hh, sizeof(hh));
+            uint32_t crc = gwRemote_crc32(0, (const uint8_t*)&hh, sizeof(hh));
             bool ok = true;
             for (int k = 0; ok && k < hh.count; k++) {
                 ResMod r;
                 ok = fread(&r, 1, sizeof(r), f) == sizeof(r);
-                crc = crc32_(crc, (const uint8_t*)&r, sizeof(r));
+                crc = gwRemote_crc32(crc, (const uint8_t*)&r, sizeof(r));
             }
             uint32_t want = 0;
             if (ok && fread(&want, 1, 4, f) == 4 && want == crc) { rec[i].ok = true; rec[i].h = hh; }
@@ -416,7 +407,7 @@ static void step() {
                 return;
             }
         }
-        if (pickGroup()) { _pos = 0; _ph = PH_PROBE; return; }
+        if (pickGroup()) { _pos = 0; _sub = 0; _ph = PH_PROBE; return; }
         if (countWaitingApply() > 0) { _ph = PH_WAIT_APPLY; return; }
         const bool ok = countFailed() == 0 && countPending() == 0;
         finish(ok ? RES_OK : RES_FAILED, ok ? 5 : 6);
@@ -437,11 +428,13 @@ static void step() {
         return;
     }
     case PH_PROBE: {
-        if (!mayTransmit(_idleMs)) return;
+        // Parked first: on a new channel the first frame is the hub's crossing trigger, which is lost by design.
+        if (!mayTransmit(_idleMs) || !parked()) return;
         Mod& m = _mods[_grp[_pos]];
         uint16_t r[5];
-        if (readRegs(m.id, 0, 5, r)) { m.fwBefore = m.fwBefore ? m.fwBefore : r[1]; m.err = 0; }
-        else { m.st = M_NO_REPLY; m.err = ERR_NO_REPLY; }
+        if (readRegs(m.id, 0, 5, r)) { m.fwBefore = m.fwBefore ? m.fwBefore : r[1]; m.err = 0; _sub = 0; }
+        else if (++_sub < 3) return;                  // one missed read is not a silent module: asked again next pass
+        else { m.st = M_NO_REPLY; m.err = ERR_NO_REPLY; _sub = 0; }
         if (++_pos >= _grpN) {
             // keep only the members that answered
             uint8_t k = 0;
@@ -471,7 +464,7 @@ static void step() {
     case PH_ENTER_CHECK: {
         if (!mayTransmit(_idleMs)) return;
         Mod& m = _mods[_grp[_pos]];
-        uint16_t r[2];
+        uint16_t r[2] = {0, 0};
         if (readRegs(m.id, REG_STATE, 2, r) && (r[0] & 0xFF) == 1) m.st = M_SESSION;
         else { m.st = M_PENDING; m.tries++; m.err = (uint8_t)(r[0] >> 8 ? r[0] >> 8 : ERR_NOT_ENTERED); if (m.tries >= MAX_TRIES) { m.st = M_GAVE_UP; m.err = ERR_GAVE_UP; } }
         if (++_pos >= _grpN) {
@@ -488,7 +481,7 @@ static void step() {
         if (!mayTransmit(_idleMs) || !parked()) return;
         sendChunk(_idx);
         if (++_idx >= _total) { _round = 1; _pos = 0; _sub = 0; _repairN = 0; memset(_missing, 0, sizeof(_missing));
-                                memset(_anyComplete, 0, sizeof(_anyComplete)); _ph = PH_REPAIR; return; }
+                                _ph = PH_REPAIR; return; }
         if (_sent % resyncEvery() == 0) _waitUntil = now_() + resyncPause();
         return;
     }
@@ -496,6 +489,10 @@ static void step() {
         // per member: state, then bitmap. A member that is complete is done; one that left the session is dropped.
         if (!mayTransmit(_idleMs)) return;
         if (_pos >= _grpN) {
+            // Every member has been looked at (read, skipped as complete, or dropped): the chunks still missing anywhere.
+            _repairN = 0;
+            for (uint16_t i = 0; i < _total; i++)
+                if ((_missing[i / 8] >> (i % 8)) & 1) _repairList[_repairN++] = i;
             if (_repairN == 0) {
                 _ph = PH_FINALIZE;
                 return;
@@ -512,7 +509,7 @@ static void step() {
         if (m.st != M_SESSION) { _pos++; return; }
         if (!parked()) return;
         keepalive();
-        uint16_t st[2];
+        uint16_t st[2] = {0, 0};
         if (!readRegs(m.id, REG_STATE, 2, st) || (st[0] & 0xFF) != 1) {
             dropMember(_pos, (uint8_t)(st[0] >> 8));
             _pos++;
@@ -528,13 +525,8 @@ static void step() {
         for (uint16_t i = 0; i < _total; i++) {
             if (!((bm[i / 16] >> (i % 16)) & 1)) { complete = false; _missing[i / 8] |= (uint8_t)(1u << (i % 8)); }
         }
-        if (complete) { m.st = M_COMPLETE; _anyComplete[_pos] = true; }
+        if (complete) m.st = M_COMPLETE;
         _pos++;
-        if (_pos >= _grpN) {
-            _repairN = 0;
-            for (uint16_t i = 0; i < _total; i++)
-                if ((_missing[i / 8] >> (i % 8)) & 1) _repairList[_repairN++] = i;
-        }
         return;
     }
     case PH_REPAIR_SEND: {
@@ -619,10 +611,15 @@ void otaRunner_begin() {}
 bool otaRunner_running() { return _run == RUN_ACTIVE; }
 
 static void doAbort() {
-    // tell the modules that are in a session, one by one (a broadcast abort would blank the display of the others too)
-    for (int i = 0; i < _grpN; i++) {
-        Mod& m = _mods[_grp[i]];
-        if (m.st == M_SESSION || m.st == M_COMPLETE) { writeCoil(m.id, COIL_ABORT); m.st = M_PENDING; }
+    // Tell every module that holds a session or a staged image, one by one (a broadcast abort would blank the display of
+    // the others too): the current group, and the modules of earlier groups that are verified and waiting to apply.
+    for (int i = 0; i < _nMods; i++) {
+        Mod& m = _mods[i];
+        if (m.st == M_SESSION || m.st == M_COMPLETE || m.st == M_VERIFIED) {
+            writeCoil(m.id, COIL_ABORT);
+            m.st = M_PENDING;
+            gwStatus_watchdogKick();                // up to 80 unicast writes in one loop pass
+        }
     }
     _abortReq = false;
     finish(RES_ABORTED, 7);
@@ -667,21 +664,32 @@ static const char* kv(char** argv, int argc, const char* key) {
     return nullptr;
 }
 
+// A whole decimal number in [lo, hi]; an absent key gives `def` (def < 0 = the key is required).
+static bool numArg(const char* v, long lo, long hi, long def, long& out) {
+    if (!v) { out = def; return def >= 0; }
+    char* e;
+    const long n = strtol(v, &e, 10);
+    if (e == v || *e != 0 || n < lo || n > hi) return false;
+    out = n;
+    return true;
+}
+
 static void cmdStart(char** argv, int argc, bool armed, void (*emit)(const char*)) {
     if (!armed) { emit("#ERR OTA err=locked hint=HELLO"); return; }
     if (_run == RUN_ACTIVE) { emit("#ERR OTA err=busy detail=a_run_is_active"); return; }
     if (!sched_timeSet()) { emit("#ERR OTA err=clock_unset hint=TIME"); return; }
     if (usbBridge_msSinceFrame() < 60000UL) { emit("#ERR OTA err=usb_busy detail=a_pc_used_the_usb_bridge_in_the_last_60s"); return; }
-    const char* slot = kv(argv, argc, "slot");
-    if (!slot || atoi(slot) < 0 || atoi(slot) > 3) { emit("#ERR OTA err=syntax want=slot=0..3"); return; }
-    _slot = (uint8_t)atoi(slot);
+    if (gwRemote_fwBusy()) { emit("#ERR OTA err=busy detail=a_gateway_firmware_upload_is_in_progress"); return; }
+    long slotV = 0;
+    if (!numArg(kv(argv, argc, "slot"), 0, 3, -1, slotV)) { emit("#ERR OTA err=syntax want=slot=0..3"); return; }
+    _slot = (uint8_t)slotV;
 
     uint32_t size = 0, crc = 0;
     uint8_t nl = 0;
     char name[25];
     const int rc = gwRemote_depotImage(_slot, _image, MAX_IMAGE, size, crc, name, nl);
     if (rc != 0) { out(emit, "#ERR OTA err=image detail=%s", rc == 1 ? "slot_not_complete" : rc == 2 ? "too_big_for_a_module" : "storage"); return; }
-    if (crc32_(0, _image, size) != crc) { emit("#ERR OTA err=image detail=crc_mismatch_on_read"); return; }
+    if (gwRemote_crc32(0, _image, size) != crc) { emit("#ERR OTA err=image detail=crc_mismatch_on_read"); return; }
     _imgSize = size; _imgCrc = crc; _imgNameLen = nl; memcpy(_imgName, name, nl); _imgName[nl] = 0;
 
     uint8_t ids[MAX_MODS], n = 0;
@@ -693,12 +701,16 @@ static void cmdStart(char** argv, int argc, bool armed, void (*emit)(const char*
         for (uint16_t i = 0; i < cnt && n < MAX_MODS; i++) ids[n++] = panel_activeSlotAt(i);
         if (n == 0) { emit("#ERR OTA err=no_ids detail=set_panel.cabinet_or_panel.shape_or_pass_ids"); return; }
     }
-    const char* v;
-    _idleMs = ((v = kv(argv, argc, "idle")) ? (uint32_t)atoi(v) : DEF_IDLE_S) * 1000UL;
-    _applyIdleMs = ((v = kv(argv, argc, "apply_idle")) ? (uint32_t)atoi(v) : DEF_APPLY_IDLE_S) * 1000UL;
-    _applyQuietMs = ((v = kv(argv, argc, "apply_quiet")) ? (uint32_t)atoi(v) : DEF_APPLY_QUIET_S) * 1000UL;
-    _groupMax = (v = kv(argv, argc, "group")) ? (uint8_t)atoi(v) : DEF_GROUP;
-    if (_groupMax < 1 || _groupMax > MAX_GROUP) { emit("#ERR OTA err=range key=group allowed=1-8"); return; }
+    // Same limits as the Test Tool's gw_ota.LIMITS; a value outside them is refused, never wrapped or clamped.
+    long idle, applyIdle, applyQuiet, group;
+    if (!numArg(kv(argv, argc, "idle"), 1, 600, DEF_IDLE_S, idle)) { emit("#ERR OTA err=range key=idle allowed=1-600"); return; }
+    if (!numArg(kv(argv, argc, "apply_idle"), 1, 3600, DEF_APPLY_IDLE_S, applyIdle)) { emit("#ERR OTA err=range key=apply_idle allowed=1-3600"); return; }
+    if (!numArg(kv(argv, argc, "apply_quiet"), 0, 86400, DEF_APPLY_QUIET_S, applyQuiet)) { emit("#ERR OTA err=range key=apply_quiet allowed=0-86400"); return; }
+    if (!numArg(kv(argv, argc, "group"), 1, MAX_GROUP, DEF_GROUP, group)) { emit("#ERR OTA err=range key=group allowed=1-8"); return; }
+    _idleMs = (uint32_t)idle * 1000UL;
+    _applyIdleMs = (uint32_t)applyIdle * 1000UL;
+    _applyQuietMs = (uint32_t)applyQuiet * 1000UL;
+    _groupMax = (uint8_t)group;
 
     if (!gwRemote_fsMount()) { emit("#ERR OTA err=storage"); return; }
     _nMods = n;

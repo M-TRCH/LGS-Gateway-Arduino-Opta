@@ -169,6 +169,8 @@ static uint32_t crc32_step(uint32_t crc, const uint8_t* p, size_t n) {
     return ~crc;
 }
 
+uint32_t gwRemote_crc32(uint32_t crc, const uint8_t* p, size_t n) { return crc32_step(crc, p, n); }
+
 static void fwCloseFile() {
     if (_fwFile) { fclose(_fwFile); _fwFile = nullptr; }
 }
@@ -308,6 +310,9 @@ static int doFwStatus(uint8_t* out) {
 static int doFwApply(uint8_t* out) {
     if (!gwConsole_armed())
         return fwStatusResp(out, SUB_FW_APPLY, FWS_LOCKED);
+    // Applying resets the board and the shelf with it: never in the middle of a module update run.
+    if (otaRunner_running())
+        return fwStatusResp(out, SUB_FW_APPLY, FWS_BUSY);
     if (_fwState != FW_STAGED)
         return fwStatusResp(out, SUB_FW_APPLY,
                             _fwState == FW_RECEIVING ? FWS_INCOMPLETE
@@ -458,6 +463,7 @@ static int dpStatus(uint8_t* out, uint8_t sub, uint8_t status, uint8_t extra) {
 }
 
 bool gwRemote_fsMount() { return dpMount(); }
+bool gwRemote_fwBusy() { return _fwState == FW_RECEIVING; }
 void gwRemote_fsHold(bool hold) { _fsHold = hold; if (hold) _fsTouchMs = millis(); }
 
 int gwRemote_depotImage(uint8_t slot, uint8_t* buf, uint32_t cap, uint32_t& size, uint32_t& crc, char* name25, uint8_t& nameLen) {

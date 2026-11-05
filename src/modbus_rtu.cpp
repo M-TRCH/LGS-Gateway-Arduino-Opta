@@ -86,12 +86,16 @@ static uint32_t _touchStart[256]  = {0};        // start of the latest episode p
 static uint32_t _touchLast[256]   = {0};        // last request in it
 static uint32_t _touchPeriod[256] = {0};        // distance between the last two episode starts; 0 = unknown
 
-static void noteForeign(const uint8_t* tx, int tx_len) {
+// `ended` = the transaction this request started has just finished: the bus was busy until now, and the request belongs to
+// the episode it started. It must never open a new episode itself, or a transaction held >2 s by a hub crossing would be
+// taken for the poller's period.
+static void noteForeign(const uint8_t* tx, int tx_len, bool ended = false) {
     if (_otaCaller) return;
     const uint32_t t = millis() ? millis() : 1;
     _foreignAt = t;
     if (tx_len < 2) return;
     const uint8_t id = tx[0];
+    if (ended) { if (id != 0 && _touchStart[id]) _touchLast[id] = t; return; }
     if (tx[1] == 0x05 || tx[1] == 0x06 || tx[1] == 0x0F || tx[1] == 0x10) _writeAt[id] = t;
     if (id == 0) return;                        // broadcast: touches nobody in particular
     if (_touchLast[id] == 0 || t - _touchLast[id] > TOUCH_EPISODE_GAP_MS) {
@@ -299,7 +303,7 @@ int rtu_transact(const uint8_t* tx, int tx_len, uint8_t* rx, uint8_t flags) {
     noteForeign(tx, tx_len);
     bool healable = false;
     int n = rtu_transact_core(tx, tx_len, rx, &healable);
-    noteForeign(tx, tx_len);            // the bus was in use until now, not only when the request began
+    noteForeign(tx, tx_len, true);      // the bus was in use until now, not only when the request began
     const bool valid = (tx_len > 0) && replyIsFor(tx, rx, n);
     if (valid)       markAlive(tx[0]);
     else if (n > 0)  noteBadReply(tx, rx, n);

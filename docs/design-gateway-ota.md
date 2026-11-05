@@ -64,6 +64,8 @@ anyone at the cabinet can see an update is in progress. It deliberately wins ove
 traffic; only `$LGS LAMP` (a timed force) overrides it, and the lamps return when the force expires. The shelf's power is never
 touched. Bench (Chest-Std-11): `INFO panel.lamp` reads `1234` during a run, `forced:12--` during `LAMP 2 4000`, `1234` after.
 
+**Review fixes before release (2026-11-05).** A repair round rebuilds its list of missing chunks once every member has been looked at, whatever the last member was (it used to be rebuilt only after the last member's bitmap read, so a group whose last module had already completed went to finalize early and re-streamed the others slow). A probe is retried three times, after the hub is parked, before a module counts as silent. The end-of-transaction bus note no longer opens a new rhythm episode (a hub-held transaction of >2 s was being taken for the poller's period). ABORT also aborts modules of earlier groups that are verified and waiting to apply. START refuses option values outside the Tool's limits instead of wrapping them, and refuses while a gateway firmware upload is arriving; FW_APPLY is refused while a run is active. Outputs configured "not used" stay off during a run.
+
 **Not promised:** literally zero impact. A pick can land during a module's 0.7 s staging erase or its 5 s reboot, and the
 OLED shows the update face while a module is receiving. The design makes both rare and short, never blocks a request, and
 never reboots a module that was recently written.

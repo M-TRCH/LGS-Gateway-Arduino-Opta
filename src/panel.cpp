@@ -349,8 +349,10 @@ static void lampUpdate(uint32_t now) {
         if (!_lampsOn && !isShelf(i)) continue;
         // A module firmware update is running: every status lamp stays lit, so
         // anyone at the cabinet can see it must not be switched off or touched.
-        // The shelf's power is never a lamp and follows its own source.
-        const bool want = (otaOn && !isShelf(i)) ? true : sourceTrue(_outSrc[i], state);
+        // The shelf's power is never a lamp and follows its own source, and an
+        // output configured "not used" stays off.
+        const bool lamp = !isShelf(i) && _outSrc[i] != SRC_NONE;
+        const bool want = (otaOn && lamp) ? true : sourceTrue(_outSrc[i], state);
         if (want == (bool)_outLit[i]) continue;
         // Relays, not LEDs: never switch a LAMP faster than the dwell. The
         // shelf's power is exempt — a reset must start and end on time.

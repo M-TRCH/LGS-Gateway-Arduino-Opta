@@ -54,6 +54,10 @@ void gwRemote_update();
 bool gwRemote_fsMount();
 void gwRemote_fsHold(bool hold);
 // Copy a complete depot image into `buf` (capacity `cap`). Returns 0 ok, 1 slot not complete, 2 too big, 3 storage error.
+// A gateway firmware image is being received: no module run may start (APPLY itself is refused while a run is active).
+bool gwRemote_fwBusy();
+// CRC-32/ISO-HDLC (zlib's), the checksum the depot and the firmware stage use. Pass 0 to start.
+uint32_t gwRemote_crc32(uint32_t crc, const uint8_t* p, size_t n);
 int  gwRemote_depotImage(uint8_t slot, uint8_t* buf, uint32_t cap, uint32_t& size, uint32_t& crc, char* name25, uint8_t& nameLen);
 
 #endif // GW_REMOTE_H

@@ -47,6 +47,7 @@
 #define MAX_TRIES         6             // a module that keeps leaving the session is given up on after this many
 #define FINALIZE_MS       1000
 #define APPLY_WAIT_MS     6000          // reset + bootloader copy
+#define APPLY_WINDOW_MS   8000          // a module is rebooted only if nobody is expected to ask for it within this long
 #define CONFIRM_TRIES     5
 
 // ── Per-module state ───────────────────────────────────────────────────────
@@ -396,6 +397,12 @@ static void keepalive() {
     }
 }
 
+// May this module be rebooted now? The bus has been quiet, nobody wrote to it recently, and the rhythm of whoever polls it says
+// the next request is not due while it would be resetting (so a polled module is rebooted right after its turn, not before it).
+static bool mayApply(uint8_t id) {
+    return rtu_msSinceForeign() >= _applyIdleMs && rtu_msSinceWrite(id) >= _applyQuietMs && rtu_msUntilNextTouch(id) >= APPLY_WINDOW_MS;
+}
+
 // ── The state machine: one small step per call ─────────────────────────────
 static void step() {
     switch (_ph) {
@@ -403,7 +410,7 @@ static void step() {
         // between groups: a module that has waited long enough for a quiet moment is applied first
         for (int i = 0; i < _nMods; i++) {
             if (_mods[i].st != M_VERIFIED) continue;
-            if (rtu_msSinceForeign() >= _applyIdleMs && rtu_msSinceWrite(_mods[i].id) >= _applyQuietMs) {
+            if (mayApply(_mods[i].id)) {
                 _applyIdx = (uint8_t)i;
                 _ph = PH_APPLY_SEND;
                 return;
@@ -419,7 +426,7 @@ static void step() {
         // everything is staged; the rest waits for the bus and the modules to be quiet
         for (int i = 0; i < _nMods; i++) {
             if (_mods[i].st != M_VERIFIED) continue;
-            if (rtu_msSinceForeign() >= _applyIdleMs && rtu_msSinceWrite(_mods[i].id) >= _applyQuietMs) {
+            if (mayApply(_mods[i].id)) {
                 _applyIdx = (uint8_t)i;
                 _ph = PH_APPLY_SEND;
                 return;
@@ -572,7 +579,7 @@ static void step() {
     case PH_APPLY_SEND: {
         Mod& m = _mods[_applyIdx];
         // re-check at the moment of sending: the bus and the module must still be quiet
-        if (rtu_msSinceForeign() < _applyIdleMs || rtu_msSinceWrite(m.id) < _applyQuietMs) { _ph = PH_PICK; return; }
+        if (!mayApply(m.id)) { _ph = PH_PICK; return; }
         writeCoil(m.id, COIL_APPLY);                // may reset before it answers
         _waitUntil = now_() + APPLY_WAIT_MS;
         _confirmTry = 0;

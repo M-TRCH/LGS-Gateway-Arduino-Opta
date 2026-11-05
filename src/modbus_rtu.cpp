@@ -77,15 +77,40 @@ static bool     _otaCaller = false;
 static uint32_t _foreignAt = 0;                 // millis() of the last foreign use; 0 = never
 static uint32_t _writeAt[256] = {0};            // millis() of the last foreign write per unit; 0 = never
 
+// When will this module next be asked something? A polling master touches each module once per pass; the runner wants to
+// reboot a module just AFTER such a touch, not just before the next one. An "episode" is a burst of requests to one unit
+// (a transaction notes the bus twice, a pass may read two registers); the period is the distance between two episode starts.
+#define TOUCH_EPISODE_GAP_MS   2000UL           // requests closer than this belong to one episode
+#define TOUCH_PERIOD_MAX_MS    600000UL         // a rhythm slower than 10 minutes is not a rhythm worth predicting
+static uint32_t _touchStart[256]  = {0};        // start of the latest episode per unit; 0 = never
+static uint32_t _touchLast[256]   = {0};        // last request in it
+static uint32_t _touchPeriod[256] = {0};        // distance between the last two episode starts; 0 = unknown
+
 static void noteForeign(const uint8_t* tx, int tx_len) {
     if (_otaCaller) return;
     const uint32_t t = millis() ? millis() : 1;
     _foreignAt = t;
-    if (tx_len >= 2 && (tx[1] == 0x05 || tx[1] == 0x06 || tx[1] == 0x0F || tx[1] == 0x10)) _writeAt[tx[0]] = t;
+    if (tx_len < 2) return;
+    const uint8_t id = tx[0];
+    if (tx[1] == 0x05 || tx[1] == 0x06 || tx[1] == 0x0F || tx[1] == 0x10) _writeAt[id] = t;
+    if (id == 0) return;                        // broadcast: touches nobody in particular
+    if (_touchLast[id] == 0 || t - _touchLast[id] > TOUCH_EPISODE_GAP_MS) {
+        const uint32_t gap = _touchStart[id] ? t - _touchStart[id] : 0;
+        _touchPeriod[id] = (gap && gap <= TOUCH_PERIOD_MAX_MS) ? gap : 0;
+        _touchStart[id] = t;
+    }
+    _touchLast[id] = t;
 }
 void     rtu_setOtaCaller(bool on) { _otaCaller = on; }
 uint32_t rtu_msSinceForeign() { return _foreignAt ? (millis() - _foreignAt) : 0xFFFFFFFFUL; }
 uint32_t rtu_msSinceWrite(uint8_t id) { return _writeAt[id] ? (millis() - _writeAt[id]) : 0xFFFFFFFFUL; }
+uint32_t rtu_msUntilNextTouch(uint8_t id) {
+    const uint32_t p = _touchPeriod[id];
+    if (!p || !_touchStart[id]) return 0xFFFFFFFFUL;            // no rhythm known: nothing to wait for
+    const uint32_t since = millis() - _touchStart[id];
+    if (since > 2 * p) return 0xFFFFFFFFUL;                     // the poller has gone quiet
+    return since >= p ? 0 : p - since;                          // overdue: it may come any moment
+}
 uint8_t  rtu_hubLastChannel() { return _hubLastCh; }
 bool     rtu_hubSettled() { return (int32_t)(_hubReadyAt - millis()) <= 0; }
 

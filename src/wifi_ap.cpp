@@ -281,7 +281,8 @@ void wifiAp_update() {
     if (_wRecv && millis() - _wLastMs > WFW_IDLE_MS) wAbort();     // an install whose stream stopped
 
     if (_wantOff) { _wantOff = false; _wantOn = false; apStop(); return; }
-    if (_wantOn) { _wantOn = false; if (_ap != AP_ON) apStart(); return; }
+    // ON while already on is a fresh request: the new `min` counts from now, not from the last client.
+    if (_wantOn) { _wantOn = false; if (_ap != AP_ON) apStart(); else _lastUse = millis(); return; }
     if (_ap != AP_ON) return;
 
     const uint32_t now = millis();

@@ -32,7 +32,7 @@ enum GwEvent : uint8_t {
     GW_EV_LINK_UP     = 3,  // param = our IP's last octet
     GW_EV_LINK_DOWN   = 4,
     GW_EV_TCP_ACCEPT  = 5,  // aux = slot, param = client IP's last octet
-    GW_EV_TCP_CLOSE   = 6,  // aux = slot
+    GW_EV_TCP_CLOSE   = 6,  // aux = slot; param 0 = the client went away, 1 = closed by the gateway (not Modbus TCP)
     GW_EV_TCP_REFUSED = 7,  // param = client IP's last octet (both slots busy)
     GW_EV_CFG_SAVED   = 8,
     GW_EV_SCHED_FIRED = 9,

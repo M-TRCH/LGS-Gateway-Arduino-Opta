@@ -108,7 +108,7 @@ static void serveSlot(int slot) {
     uint16_t mbapLen = ((uint16_t)tcp_buf[4] << 8) | tcp_buf[5];
 
     // The service AP's page rides this port (no socket is left for another listener): a request that starts "GET " from
-    // a client on the AP subnet is answered as HTTP and the connection closed. On the LAN it is dropped as before.
+    // a client on the AP subnet is answered as HTTP and the connection closed. On the LAN it gets no answer (closed below).
     if (protoId != 0 && wifiAp_isUp() && memcmp(tcp_buf, "GET ", 4) == 0) {
         const IPAddress rip = cl.remoteIP();
         const uint8_t ip4[4] = {rip[0], rip[1], rip[2], rip[3]};
@@ -118,9 +118,13 @@ static void serveSlot(int slot) {
             return;
         }
     }
+    // Not Modbus TCP (a browser, a port scanner, a client whose stream lost its framing): close it. Draining and keeping
+    // the connection let a browser tab on the LAN hold one of the two client slots for as long as the tab stayed open.
+    // tcp_close p=1 marks a close by the gateway (p=0 is the client going away).
     if (protoId != 0) {
-        LOG_SERIAL.println("[ERR] Protocol ID != 0 — not Modbus TCP, discarding.");
-        while (cl.available()) cl.read();
+        LOG_SERIAL.println("[ERR] Protocol ID != 0 — not Modbus TCP, closing.");
+        eventLog_note(GW_EV_TCP_CLOSE, (uint8_t)(slot + 1), 1);
+        cl.stop();
         return;
     }
     if (mbapLen < 2 || mbapLen > (TCP_BUF_SIZE - MBAP_HEADER_LEN)) {

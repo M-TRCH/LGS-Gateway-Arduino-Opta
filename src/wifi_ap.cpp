@@ -340,9 +340,11 @@ void wifiAp_info(void (*emit)(const char*)) {
 // AP SCAN lists what the radio hears. AP PROBE <ssid> <pass> joins that AP, fetches its page, asks it for PING through
 // /api, tries a Modbus read of unit 11 (refused with 0x0A unless that AP allows the bridge), leaves, writes the results
 // to /fs/APPROBE.TXT and REBOOTS this unit: the core makes the newest interface the default route, and a reboot is the
-// one sure way back to the LAN. AP PROBE RESULT prints the file.
+// one sure way back to the LAN. AP PROBE RESULT prints the file. AP TESTLAN 1 serves the page to the LAN too.
+// Off in a normal build: a reboot verb and a LAN page have no business on a site. Bench build: -DWIFIAP_TEST=1
+// (see platformio.ini).
 #ifndef WIFIAP_TEST
-#define WIFIAP_TEST 1
+#define WIFIAP_TEST 0
 #endif
 #if WIFIAP_RADIO && WIFIAP_TEST
 static const char* stationReady() {
@@ -433,8 +435,6 @@ static void cmdProbe(const char* ssid, const char* pass, void (*emit)(const char
         n = exchange(mb, sizeof(mb), buf, sizeof(buf), ms);
         pr("modbus unit11 bytes=%d ms=%lu fc=0x%02X code=0x%02X\n", n, (unsigned long)ms, n >= 8 ? buf[7] : 0, n >= 9 ? buf[8] : 0);
         gwStatus_watchdogKick();
-        const uint8_t gs[] = "GET / HTTP/1.0\r\n\r\n";
-        (void)gs;
         WiFi.disconnect();
     }
     gwStatus_watchdogRestore();
@@ -456,7 +456,6 @@ static void cmdProbeResult(void (*emit)(const char*)) {
     char line[160];
     while (fgets(line, sizeof(line), f)) {
         char* e = strchr(line, '\n'); if (e) *e = 0;
-        for (char* p = line; *p; p++) if (*p == ' ') *p = ' ';
         out(emit, "#DATA %s", line);
     }
     fclose(f);

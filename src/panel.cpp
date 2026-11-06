@@ -5,6 +5,7 @@
 #include "gw_store.h"
 #include "net_runtime.h"
 #include "ota_runner.h"
+#include "wifi_ap.h"
 #include "tcp_bridge.h"
 
 // Inputs 1-5 on the Opta terminal block. Red, green, blue, yellow, white in
@@ -437,8 +438,9 @@ void panel_update() {
             if (level != _idleLevel[i] && _action[i] != PANEL_NONE) {
                 // Manual actions only — a scheduled reset logs its own event.
                 eventLog_note(GW_EV_SWEEP, _action[i], (uint16_t)(i + 1));
-                if (_action[i] == PANEL_LAMP_TEST) startLampTest();
-                else                               startSweep(_action[i]);
+                if (_action[i] == PANEL_LAMP_TEST)       startLampTest();
+                else if (_action[i] == PANEL_SERVICE_AP) wifiAp_panelToggle();
+                else                                     startSweep(_action[i]);
             }
         }
     }
@@ -519,6 +521,7 @@ const char* panel_actionName(uint8_t action) {
         case PANEL_RESET:      return "reset";
         case PANEL_LAMP_TEST:  return "lamp_test";
         case PANEL_ALL_8:      return "all_8";
+        case PANEL_SERVICE_AP: return "service_ap";
         default:               return "none";
     }
 }

@@ -11,6 +11,7 @@
 #include "net_runtime.h"
 #include "ota_runner.h"
 #include "wifi_ap.h"
+#include "mod_sweep.h"
 #include "ntp.h"
 #include "tcp_bridge.h"
 #include "panel.h"
@@ -118,6 +119,7 @@ void loop() {
     if (netRuntime_isUp()) tcpBridge_update();
     otaRunner_update();         // after the bridges: anything they had to do has already been done
     wifiAp_update();            // the service AP: starts/stops only on request, idle timer, radio-file install timeout
+    modSweep_update();          // SWEEP: one module read per pass while a sweep runs
     ntp_update();               // checks enabled/link state itself
     gwStatus_update();
     panel_update();

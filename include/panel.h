@@ -34,7 +34,10 @@ enum PanelAction : uint8_t {
                             // other seven. Needs module fw >= 3.5.0 to mean
                             // anything: below that the windows are radio and
                             // the sweep just ends on window 8.
-    PANEL_ACTION_MAX = 6,
+    PANEL_SERVICE_AP = 7,   // toggle the service Wi-Fi access point (Opta WiFi
+                            // only; refused without a radio firmware file or
+                            // an AP password). Not a sweep: nothing on the bus
+    PANEL_ACTION_MAX = 7,
 };
 
 // Slot count of the cabinet a sweep walks — but A COUNT IS NOT A SHAPE, and

@@ -56,6 +56,11 @@ void ntp_update() {
         _state = NtpState::PAUSED;
         return;
     }
+    if (_state == NtpState::PAUSED) {
+        // The AP is off again: say what the clock really is, and ask the server soon rather than in up to a day.
+        _state = _lastSyncEpoch ? NtpState::OK : NtpState::WAITING_LINK;
+        _nextAttemptMs = millis() + 15000UL;    // after the radio has handed its DHCP server's socket back
+    }
     if (!netRuntime_isUp()) {
         // The link-up path calls ntp_kick(), so leaving _nextAttemptMs alone
         // here costs nothing — the kick will bring it forward.

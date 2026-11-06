@@ -3,6 +3,8 @@
 #include "gw_remote.h"
 #include "gw_status.h"
 #include "modbus_rtu.h"
+#include "wifi_ap.h"
+#include "ap_http.h"
 
 // Constructed without a port: the listener does not exist until net_runtime
 // starts it, so nothing here runs on a gateway with the network switched off.
@@ -105,6 +107,17 @@ static void serveSlot(int slot) {
     uint16_t protoId = ((uint16_t)tcp_buf[2] << 8) | tcp_buf[3];
     uint16_t mbapLen = ((uint16_t)tcp_buf[4] << 8) | tcp_buf[5];
 
+    // The service AP's page rides this port (no socket is left for another listener): a request that starts "GET " from
+    // a client on the AP subnet is answered as HTTP and the connection closed. On the LAN it is dropped as before.
+    if (protoId != 0 && wifiAp_isUp() && memcmp(tcp_buf, "GET ", 4) == 0) {
+        const IPAddress rip = cl.remoteIP();
+        const uint8_t ip4[4] = {rip[0], rip[1], rip[2], rip[3]};
+        if (wifiAp_httpAllowed(ip4)) {
+            apHttp_serve(cl, tcp_buf, MBAP_HEADER_LEN);
+            eventLog_note(GW_EV_TCP_CLOSE, (uint8_t)(slot + 1), 0);
+            return;
+        }
+    }
     if (protoId != 0) {
         LOG_SERIAL.println("[ERR] Protocol ID != 0 — not Modbus TCP, discarding.");
         while (cl.available()) cl.read();
@@ -140,6 +153,22 @@ static void serveSlot(int slot) {
     printHex("TCP RX", tcp_buf, tcp_total);
     LOG_SERIAL.print("[TCP] Unit ID="); LOG_SERIAL.print(tcp_buf[6]);
     LOG_SERIAL.print("  FC=0x"); LOG_SERIAL.println(tcp_buf[7], HEX);
+
+    // ── Service AP clients: the console (unit 255) always, the bus only with AP ON bridge=1 ──
+    // The cabinet drives drawer latches; a phone on the AP must not be able to open them unless that was asked for.
+    if (wifiAp_isUp()) {
+        const IPAddress rip = cl.remoteIP();
+        const uint8_t ip4[4] = {rip[0], rip[1], rip[2], rip[3]};
+        if (wifiAp_isApClient(ip4)) {
+            wifiAp_touch();
+            if (tcp_buf[6] != GW_SELF_UNIT && !wifiAp_bridgeAllowed()) {
+                uint8_t ex[9] = {(uint8_t)(transId >> 8), (uint8_t)(transId & 0xFF), 0, 0, 0, 3,
+                                 tcp_buf[6], (uint8_t)(tcp_buf[7] | 0x80), 0x0A};   // gateway path unavailable
+                cl.write(ex, sizeof(ex));
+                return;
+            }
+        }
+    }
 
     // ── Unit GW_SELF_UNIT: the gateway itself — never the bus ──────────────
     // The console and the network firmware update ride here. Everything is

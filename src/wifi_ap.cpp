@@ -200,6 +200,8 @@ static const char* _lastErr = "";
 bool wifiAp_isUp() { return _ap == AP_ON; }
 bool wifiAp_isApClient(const uint8_t ip[4]) { return ip[0] == AP_IP_A && ip[1] == AP_IP_B && ip[2] == AP_IP_C; }
 bool wifiAp_bridgeAllowed() { return _bridge; }
+static bool _testLan = false;             // bench only (AP TESTLAN 1): the page also for LAN clients, until AP OFF
+bool wifiAp_httpAllowed(const uint8_t ip[4]) { return wifiAp_isApClient(ip) || _testLan; }
 void wifiAp_touch() { _lastUse = millis(); }
 
 static bool loadPass(char* out, size_t cap) {
@@ -271,6 +273,7 @@ static void apStop() {
 #endif
     _ap = AP_OFF;
     _bridge = false;
+    _testLan = false;
     ledShow(netRuntime_isUp());
 }
 
@@ -322,14 +325,144 @@ static const char* stateName() {
     }
 }
 
-void wifiAp_infoLine(char* o, size_t n) {
+void wifiAp_info(void (*emit)(const char*)) {
     const uint32_t left = (_ap == AP_ON) ? (uint32_t)_idleMin * 60UL - min((millis() - _lastUse) / 1000UL, (uint32_t)_idleMin * 60UL) : 0;
     struct mallinfo mi = mallinfo();
-    snprintf(o, n, "hw.otp=%d hw.wifi=%d hw.rs485=%d hw.pid=0x%04X wifi.fw=%s ap.state=%s ap.left_s=%lu ap.bridge=%d ap.start_ms=%lu ap.heap_used=%lu",
-             gwStatus_otpValid() ? 1 : 0, gwStatus_hasWifi() ? 1 : 0, (gwStatus_boardFunc() & 0x02) ? 1 : 0,
-             (unsigned)gwStatus_boardPid(), wifiAp_fwState(), stateName(), (unsigned long)left, _bridge ? 1 : 0,
-             (unsigned long)_startMs, (unsigned long)mi.uordblks);
+    out(emit, "#DATA hw.otp=%d hw.wifi=%d hw.rs485=%d hw.pid=0x%04X wifi.fw=%s",
+        gwStatus_otpValid() ? 1 : 0, gwStatus_hasWifi() ? 1 : 0, (gwStatus_boardFunc() & 0x02) ? 1 : 0,
+        (unsigned)gwStatus_boardPid(), wifiAp_fwState());
+    out(emit, "#DATA ap.state=%s ap.left_s=%lu ap.bridge=%d ap.start_ms=%lu ap.starts=%u ap.fails=%u heap.used=%lu",
+        stateName(), (unsigned long)left, _bridge ? 1 : 0, (unsigned long)_startMs, _starts, _fails, (unsigned long)mi.uordblks);
 }
+
+
+// ── Bench test verbs: this unit as a Wi-Fi station against another gateway's AP ──
+// AP SCAN lists what the radio hears. AP PROBE <ssid> <pass> joins that AP, fetches its page, asks it for PING through
+// /api, tries a Modbus read of unit 11 (refused with 0x0A unless that AP allows the bridge), leaves, writes the results
+// to /fs/APPROBE.TXT and REBOOTS this unit: the core makes the newest interface the default route, and a reboot is the
+// one sure way back to the LAN. AP PROBE RESULT prints the file.
+#ifndef WIFIAP_TEST
+#define WIFIAP_TEST 1
+#endif
+#if WIFIAP_RADIO && WIFIAP_TEST
+static const char* stationReady() {
+    if (!gwStatus_hasWifi()) return "no_radio";
+    if (strcmp(wifiAp_fwState(), "ok") != 0) return "wifi_fw_not_installed";
+    if (_ap != AP_OFF) return "ap_is_on_here";
+    return nullptr;
+}
+
+static void cmdScan(void (*emit)(const char*)) {
+    const char* why = stationReady();
+    if (why) { out(emit, "#ERR AP err=refused detail=%s", why); return; }
+    gwStatus_watchdogKick();
+    gwStatus_watchdogStretch();
+    const int n = WiFi.scanNetworks();
+    gwStatus_watchdogRestore();
+    gwStatus_watchdogKick();
+    for (int i = 0; i < n && i < 20; i++)
+        out(emit, "#DATA ssid=%s rssi=%ld ch=%u enc=%u", WiFi.SSID(i), (long)WiFi.RSSI(i), (unsigned)WiFi.channel(i), (unsigned)WiFi.encryptionType(i));
+    out(emit, "#OK AP SCAN n=%d", n);
+}
+
+static char _probe[1536];
+static size_t _probeLen = 0;
+static void pr(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
+static void pr(const char* fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    const int k = vsnprintf(_probe + _probeLen, sizeof(_probe) - _probeLen, fmt, ap);
+    va_end(ap);
+    if (k > 0) _probeLen = min(_probeLen + (size_t)k, sizeof(_probe) - 1);
+}
+
+// One request/answer on a fresh connection to 192.168.77.1:502. Returns bytes read; the first `keep` go to `buf`.
+static int exchange(const uint8_t* req, size_t reqLen, uint8_t* buf, size_t keep, uint32_t& ms) {
+    WiFiClient c;
+    const uint32_t t0 = millis();
+    if (!c.connect(IPAddress(192, 168, 77, 1), 502)) { ms = millis() - t0; return -1; }
+    c.write(req, reqLen);
+    int got = 0;
+    const uint32_t t1 = millis();
+    while (millis() - t1 < 4000) {
+        gwStatus_watchdogKick();
+        while (c.available()) {
+            const int b = c.read();
+            if (b < 0) break;
+            if ((size_t)got < keep) buf[got] = (uint8_t)b;
+            got++;
+        }
+        if (!c.connected() && !c.available()) break;
+        delay(5);
+    }
+    c.stop();
+    ms = millis() - t0;
+    return got;
+}
+
+static void cmdProbe(const char* ssid, const char* pass, void (*emit)(const char*)) {
+    const char* why = stationReady();
+    if (why) { out(emit, "#ERR AP err=refused detail=%s", why); return; }
+    emit("#OK AP PROBE note=joining_then_reboot_read_AP_PROBE_RESULT_after");
+    delay(50);
+    _probeLen = 0;
+    pr("ssid=%s\n", ssid);
+    gwStatus_watchdogKick();
+    gwStatus_watchdogStretch();
+    const uint32_t t0 = millis();
+    const int st = WiFi.begin(ssid, pass, ENC_TYPE_CCMP);
+    pr("join status=%d ms=%lu ip=%s\n", st, (unsigned long)(millis() - t0), WiFi.localIP().toString().c_str());
+    gwStatus_watchdogKick();
+    if (st == WL_CONNECTED) {
+        uint8_t buf[200];
+        uint32_t ms = 0;
+        static const char g1[] = "GET / HTTP/1.0\r\n\r\n";
+        int n = exchange((const uint8_t*)g1, sizeof(g1) - 1, buf, sizeof(buf) - 1, ms);
+        buf[n > 0 ? min(n, (int)sizeof(buf) - 1) : 0] = 0;
+        char* eol = strchr((char*)buf, '\r'); if (eol) *eol = 0;
+        pr("page bytes=%d ms=%lu first=%s\n", n, (unsigned long)ms, (char*)buf);
+        gwStatus_watchdogKick();
+        static const char g2[] = "GET /api?l=PING HTTP/1.0\r\n\r\n";
+        n = exchange((const uint8_t*)g2, sizeof(g2) - 1, buf, sizeof(buf) - 1, ms);
+        buf[n > 0 ? min(n, (int)sizeof(buf) - 1) : 0] = 0;
+        char* body = strstr((char*)buf, "\r\n\r\n");
+        if (body) { body += 4; char* e = strchr(body, '\n'); if (e) *e = 0; }
+        pr("api bytes=%d ms=%lu body=%s\n", n, (unsigned long)ms, body ? body : "-");
+        gwStatus_watchdogKick();
+        const uint8_t mb[12] = {0x12, 0x34, 0, 0, 0, 6, 11, 0x03, 0, 0, 0, 1};
+        n = exchange(mb, sizeof(mb), buf, sizeof(buf), ms);
+        pr("modbus unit11 bytes=%d ms=%lu fc=0x%02X code=0x%02X\n", n, (unsigned long)ms, n >= 8 ? buf[7] : 0, n >= 9 ? buf[8] : 0);
+        gwStatus_watchdogKick();
+        const uint8_t gs[] = "GET / HTTP/1.0\r\n\r\n";
+        (void)gs;
+        WiFi.disconnect();
+    }
+    gwStatus_watchdogRestore();
+    gwStatus_watchdogKick();
+    pr("done ms=%lu\n", (unsigned long)(millis() - t0));
+    if (gwRemote_fsMount()) {
+        FILE* f = fopen("/fs/APPROBE.TXT", "wb");
+        if (f) { fwrite(_probe, 1, _probeLen, f); fclose(f); }
+    }
+    eventLog_note(GW_EV_AP, 5, (uint16_t)st);
+    delay(200);
+    NVIC_SystemReset();
+}
+
+static void cmdProbeResult(void (*emit)(const char*)) {
+    if (!gwRemote_fsMount()) { emit("#ERR AP err=storage"); return; }
+    FILE* f = fopen("/fs/APPROBE.TXT", "rb");
+    if (!f) { emit("#ERR AP err=none detail=no_probe_yet"); return; }
+    char line[160];
+    while (fgets(line, sizeof(line), f)) {
+        char* e = strchr(line, '\n'); if (e) *e = 0;
+        for (char* p = line; *p; p++) if (*p == ' ') *p = ' ';
+        out(emit, "#DATA %s", line);
+    }
+    fclose(f);
+    emit("#OK AP PROBE RESULT");
+}
+#endif
 
 void wifiAp_command(char** argv, int argc, bool armed, void (*emit)(const char*)) {
     const char* sub = argc > 0 ? argv[0] : "STATUS";
@@ -343,7 +476,23 @@ void wifiAp_command(char** argv, int argc, bool armed, void (*emit)(const char*)
         emit("#OK AP");
         return;
     }
+#if WIFIAP_RADIO && WIFIAP_TEST
+    if (!strcasecmp(sub, "PROBE") && argc >= 2 && !strcasecmp(argv[1], "RESULT")) { cmdProbeResult(emit); return; }
+#endif
     if (!armed) { emit("#ERR AP err=locked hint=HELLO"); return; }
+#if WIFIAP_RADIO && WIFIAP_TEST
+    if (!strcasecmp(sub, "SCAN")) { cmdScan(emit); return; }
+    if (!strcasecmp(sub, "TESTLAN")) {
+        _testLan = _ap == AP_ON && argc >= 2 && !strcmp(argv[1], "1");
+        out(emit, "#OK AP TESTLAN=%d note=bench_only_cleared_by_AP_OFF", _testLan ? 1 : 0);
+        return;
+    }
+    if (!strcasecmp(sub, "PROBE")) {
+        if (argc < 3) { emit("#ERR AP err=syntax want=PROBE_<ssid>_<pass>|PROBE_RESULT"); return; }
+        cmdProbe(argv[1], argv[2], emit);
+        return;
+    }
+#endif
     if (!strcasecmp(sub, "ON")) {
         const char* v = kv(argv + 1, argc - 1, "min");
         const long m = v ? strtol(v, nullptr, 10) : AP_DEF_MIN;

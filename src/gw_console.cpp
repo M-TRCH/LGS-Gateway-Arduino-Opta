@@ -1,5 +1,6 @@
 #include "ota_runner.h"
 #include "wifi_ap.h"
+#include "mod_sweep.h"
 #include "gw_console.h"
 
 #include <stdarg.h>
@@ -147,7 +148,7 @@ static void doInfo() {
     emitf("#DATA rtu.bad_crc=%lu rtu.bad_other=%lu",
           (unsigned long)rtu_badCrc(), (unsigned long)rtu_badOther());
     { char ol[96]; otaRunner_infoLine(ol, sizeof(ol)); emitf("#DATA %s", ol); }
-    { char al[200]; wifiAp_infoLine(al, sizeof(al)); emitf("#DATA %s", al); }
+    wifiAp_info(emit);
     emitf("#DATA panel.state=%s panel.step=%u/%u panel.in=0x%02X panel.lamp=%s",
           panel_stateName(), panel_progress(), panel_total(),
           (unsigned)panel_inputMask(), panel_lampName());
@@ -319,7 +320,7 @@ static void doLog(char** argv, int argc) {
 }
 
 static void doHelp() {
-    emit("#DATA verbs=PING,INFO,HELP,GET,HELLO,BYE,SET,SAVE,DISCARD,DEFAULTS,REBOOT,LAMP,TIME,LOG,RESYNC,EXC,OTA,AP");
+    emit("#DATA verbs=PING,INFO,HELP,GET,HELLO,BYE,SET,SAVE,DISCARD,DEFAULTS,REBOOT,LAMP,TIME,LOG,RESYNC,EXC,OTA,AP,SWEEP");
     emit("#DATA note=SET/SAVE/DISCARD/DEFAULTS/REBOOT and RESYNC/EXC with a value need HELLO first; RESYNC/EXC are volatile (default RESYNC=1 EXC=0 at every boot)");
     for (int i = 0; i < gwConfig_keyCount(); i++) {
         emitf("#DATA key=%s%s%s", gwConfig_keyName(i),
@@ -425,6 +426,7 @@ static void dispatch(char* body) {
     else if (strcasecmp(verb, "LOG")  == 0) doLog(rest, restN);
     else if (strcasecmp(verb, "OTA")  == 0) otaRunner_command(rest, restN, gwConsole_armed(), emit);
     else if (strcasecmp(verb, "AP")   == 0) wifiAp_command(rest, restN, gwConsole_armed(), emit);
+    else if (strcasecmp(verb, "SWEEP") == 0) modSweep_command(rest, restN, emit);
     else if (strcasecmp(verb, "RESYNC") == 0) doToggle("RESYNC", rest, restN, rtu_healEnabled, rtu_setHeal);
     else if (strcasecmp(verb, "EXC")    == 0) doToggle("EXC", rest, restN, tcpBridge_exceptionEnabled, tcpBridge_setException);
     else if (strcasecmp(verb, "GET")  == 0) {

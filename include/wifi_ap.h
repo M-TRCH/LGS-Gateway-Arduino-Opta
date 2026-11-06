@@ -24,11 +24,12 @@ void wifiAp_update();                 // every loop()
 bool wifiAp_isUp();                   // the AP is on (NTP pauses, the bridge filters AP clients)
 bool wifiAp_isApClient(const uint8_t ip[4]);  // a client address inside the AP subnet
 bool wifiAp_bridgeAllowed();          // AP clients may use the Modbus bridge (AP ON bridge=1)
+bool wifiAp_httpAllowed(const uint8_t ip[4]);  // the page is served to this client (AP subnet; LAN only with AP TESTLAN 1)
 void wifiAp_touch();                  // an AP client did something: restart the idle timer
 void wifiAp_panelToggle();            // the front-panel action
 
 // Console verb `AP ...` and the INFO line (no spaces inside values).
 void wifiAp_command(char** argv, int argc, bool armed, void (*emit)(const char* line));
-void wifiAp_infoLine(char* out, size_t n);
+void wifiAp_info(void (*emit)(const char* line));        // two #DATA lines for INFO
 
 #endif // WIFI_AP_H

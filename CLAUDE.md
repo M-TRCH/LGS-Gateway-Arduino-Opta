@@ -51,7 +51,7 @@ All first-party code lives in `src/` + `include/` (~2000 lines).
 | `config.h` | Pins, LED map, and the **factory defaults** that seed `GwConfig`. Not the live values. |
 | `modbus_rtu` | RTU transport: `crc16`, `verifyCRC`, `rtu_transact(..., flags)` (pre-TX flush, **TX echo consumed**, separate first-reply window `RTU_REPLY_WINDOW_MS`, hub hold), `rtu_send()` (broadcast, no reply wait), `rtu_setTimeouts()`. With `RTU_F_HEAL` (TCP bridge and panel only — **never the USB bridge**) a missing reply is followed by one broadcast re-sync and one retry; counters `rtu_resyncCount/retryOk/retryFail/badCrc/badOther` |
 | `usb_bridge` | USB COM ↔ RS485 passthrough: gap-delimited frame intake, CRC gate, transactional forward. Rejected bytes go to `gwConsole_feed()`. |
-| `tcp_bridge` | Modbus TCP ↔ RTU re-framing, **two client slots** (`_client[2]`; a third connection is refused). lwIP is compiled for 4 sockets total (inside the prebuilt libmbed.a): listener + 2 clients + NTP's transient UDP = all four — never add a slot. Listener started/stopped by `net_runtime`; owns no Ethernet state. |
+| `tcp_bridge` | Modbus TCP ↔ RTU re-framing, **two client slots** (`_client[2]`; a third connection is refused). lwIP is compiled for 4 sockets total (inside the prebuilt libmbed.a): listener + 2 clients + NTP's transient UDP = all four — never add a slot. While the service AP is up its DHCP server holds NTP's socket, which is why NTP pauses for as long as the AP is on. A client whose first bytes are not Modbus TCP (protocol id ≠ 0) is closed, never drained and kept (a browser tab on :502 used to hold a slot); `GET ` from an AP client is the service page instead. Listener started/stopped by `net_runtime`; owns no Ethernet state. |
 | `net_runtime` | Bounded `Ethernet.begin()`, link polling, TCP listener lifecycle, `NetState`; `startServer()` is the one "link just came up" funnel and kicks `ntp` |
 | `ntp` | SNTP client: transient `EthernetUDP`, IP-only server (`net.ntp`), query on link-up + daily, 15-min retry, silent failure. UTC→wall via `time.tz_min` happens here ONLY |
 | `event_log` | 16-byte-record ring on the RAW QSPI window **14–15.5 MB** (outside every QSPIFormat partition — partition 4 is LittleFS/PLC land, do not move it there). Non-fatal on storage errors; `$LGS LOG` |
@@ -60,12 +60,15 @@ All first-party code lives in `src/` + `include/` (~2000 lines).
 | `gw_console` | The `$LGS` text protocol: line state machine, verbs, session arming. Output goes through a swappable emit sink (`gwConsole_execute`) so `gw_remote` can capture it |
 | `gw_remote` | The gateway-self path on port 502: unit **255** / FC **0x41** carries the console (EXEC/READ paging over a 12 KB buffer) and the network firmware update (stage `UPDATE.BIN` on QSPI partition 2, CRC-verify, then the factory bootloader's RTC-magic apply via Arduino_Portenta_OTA). Gated by `net.console` |
 | `ota_runner` | The gateway runs the **module OTA itself, in the background** (`$LGS OTA START/STATUS/RESULT/ABORT`): reads the image from the depot, stages modules in small groups, applies each module only when the bus and that module are quiet, keeps the last two runs on the OTA FAT partition and in the event log. It is stepped from `loop()` after the bridges and transmits only when `rtu_msSinceForeign()` says nobody else used the bus; an apply also needs `rtu_msUntilNextTouch()` >= 8 s (the foreign poller's learned per-unit rhythm), and while it runs `panel` keeps the three status lamps lit (see docs/design-gateway-ota.md) |
+| `wifi_ap` | Service Wi-Fi AP, **Opta WiFi only** (docs/design-service-ap.md): `$LGS AP`, radio-file check and network install (FC 0x41 subs 0x30-0x32), start/stop from `loop()` inside an IWDG stretch, never at boot, off after `min` idle minutes; LED_D1 blinks while up. Bench verbs SCAN / PROBE / TESTLAN exist only in a `-DWIFIAP_TEST=1` build |
+| `ap_http` | The service page and `/api?l=<console line>` on port 502, for AP clients (192.168.77.0/24) only; one inline file, `Connection: close` |
+| `mod_sweep` | `$LGS SWEEP`: read-only walk of the modules, one FC03 per `loop()` pass |
 | `gw_status` | Counters, RTT, LEDs, OTP MAC, reset reason (string + one-byte code), RTC-backed boot counter, safe mode |
 | `panel` | Front-panel buttons (inputs 1-5), cabinet sweeps, and the four relay outputs — lamps and the shelf's power, all mapped from config |
 | `sched` | Wall clock and the scheduled shelf reset. `sched_setTime(epoch, src)` is the single clock funnel — both the console's TIME and NTP hand it WALL time |
 | `main.cpp` | Setup ordering (see below) and the loop |
 
-Function naming is module-prefixed: `tcpBridge_*`, `usbBridge_*`, `netRuntime_*`, `ntp_*`, `eventLog_*`, `gwConfig_*`, `gwStore_*`, `gwConsole_*`, `gwStatus_*`, `panel_*`, `sched_*`, `rtu_*`.
+Function naming is module-prefixed: `tcpBridge_*`, `usbBridge_*`, `netRuntime_*`, `ntp_*`, `eventLog_*`, `gwConfig_*`, `gwStore_*`, `gwConsole_*`, `gwStatus_*`, `panel_*`, `sched_*`, `rtu_*`, `wifiAp_*`, `apHttp_*`, `modSweep_*`.
 
 ### Setup ordering is the safety story
 
@@ -97,6 +100,8 @@ $LGS SET key=value ...        # staged only
 $LGS SAVE | DISCARD | DEFAULTS | REBOOT
 $LGS RESYNC [0|1]             # volatile: broadcast re-sync + one retry after a missing RS485 reply (default 1 at every boot)
 $LGS EXC [0|1]                # volatile: answer an RS485 timeout with Modbus exception 0x0B at once (default 0)
+$LGS AP [ON [min=N] [bridge=0|1] | OFF | PASS <8-31 chars>]   # service Wi-Fi AP; ON/OFF/PASS need HELLO
+$LGS SWEEP START [ids=..|all] | STATUS | STOP                  # read-only module walk, no HELLO
 ```
 
 `LAMP`, `TIME` and `LOG` are deliberately **not** session-gated: none outlives its own timeout (LOG is read-only), and a clock that needs a session to correct is a clock that spends its life wrong. LOG kicks the watchdog per emitted line — the USB CDC blocks while a connected host is not reading, and a 100-line dump into a stalled terminal must not reset the gateway.
@@ -133,6 +138,7 @@ The key table is **append-only**: `valueOf()`/`storeValue()` switch on the index
 - **`RESYNC` and `EXC` are volatile console switches on purpose.** A stored key would be a `GW_BLOB_SCHEMA` bump and wipe every unit. They need `HELLO` to change and reset to RESYNC=1 / EXC=0 at every boot, so a bench run with `RESYNC 0` silently reverts when the unit reboots — check `rtu.heal` in `INFO` before trusting a long A/B run. `EXC 1` is for masters that cannot afford a timeout (the client sees 0x0B instead of a dead connection); it is off by default because existing clients treat 0x0B as an error they never saw before.
 - **`INFO` first-try misses = `cnt.rs485_timeout` + `rtu.retry_ok`.** `cnt.rs485_timeout` is the FINAL outcome. `rtu.bad_crc` (right unit id, wrong CRC) and `rtu.bad_other` (runts, other unit ids) tell a garbled module from a silent one; Ref-12 row 2 is silent, not garbled.
 - **Only two client slots, and a bench script holds one.** A third connection is accepted and closed at once, which looks like "the gateway died" in a script that reconnects on error. Check `net.client` and close scripts' sockets (and the fleet soak on the test PC) before a flash or a bench run.
+- **The radio needs `/wlan/4343WA1.BIN` on QSPI partition 1, and the core's driver spins forever without it.** Nothing may touch `WiFi` before `wifiAp_fwState()` says `ok`. Never run Arduino's `WiFiFirmwareUpdater` on a gateway: it erases QSPI 14-16 MB, which is the event log; install the file over the network (FC 0x41 0x30-0x32) instead. Every blocking driver call (beginAP, scan, station join) runs inside `gwStatus_watchdogStretch()` / `Restore()`.
 - **Broadcasts (address 0) must not wait for a reply.** OTA streams chunks back-to-back; a first-byte timeout per chunk lets the next frames merge in the USB buffer and fail CRC. Both bridges call `rtu_send()` for address 0.
 - Module addressing: slave ID = `row*10 + col` on a **10×8** grid (11–18 … 101–108). LGS-64 is not a rectangle: rows 1–3 and 8–10 are eight wide, rows 4–7 four wide.
 - Module coils are combinations, not steps: 1001 ring, 1011 ring + number, 1021 ring + latch, 1031 all three. The latch coils self-clear and mirror their state twin, so 1021 clears through 1001 and **1031 clears through 1011** — clearing 1031 through 1001 puts the ring out and leaves the display lit.

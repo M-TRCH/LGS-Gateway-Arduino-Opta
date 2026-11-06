@@ -38,7 +38,8 @@ A separate HTTP listener does not fit, and the earlier plan's answer (stop the M
 So **the page is served on port 502 itself**: a Modbus TCP frame has protocol id 0 in bytes 2-3, an HTTP request starts
 with `GET `, so the first bytes of a request tell the two apart without doubt. The phone opens `http://192.168.77.1:502/`
 (502 is not on any browser's blocked-port list). HTTP is answered only for clients on the AP subnet; on the LAN a
-`GET` is dropped exactly as before. Every response is `Connection: close` and the page is one file with no favicon, so a
+`GET` gets no answer and the connection is closed (since 1.15 any client whose first bytes are not Modbus TCP is closed:
+draining and keeping it let a browser tab on the LAN hold a client slot). Every response is `Connection: close` and the page is one file with no favicon, so a
 phone holds a slot for milliseconds.
 
 ## Behaviour
@@ -95,8 +96,11 @@ phone holds a slot for milliseconds.
 ## Test plan on Chest-Std-11 (network only: there is no USB Opta on this PC)
 
 Std-11 is reached only over the LAN, so every step keeps the boot path unchanged and puts the new code behind a command.
-This PC's own Wi-Fi carries its route to the bench and its internet, so it **must not join the AP**: the AP is checked
-by scanning (`netsh wlan show networks mode=bssid`), and association, DHCP and the page are left for a phone.
+This PC's own Wi-Fi carries its route to the bench and its internet, so it **must not join the AP**; it is also too far
+from the cabinets to hear the AP at all (a scan on 2026-11-05 saw only its own network). So the PC checks the gateway's
+side and the LAN, and the radio side (the SSID on air, association, DHCP, the page) needs a phone or another Opta WiFi
+near the cabinet (`AP PROBE` on a second gateway does it end to end). `AP SCAN`, `AP PROBE` (which reboots the unit) and
+`AP TESTLAN 1` (the page on the LAN too) exist only in a bench build, `-DWIFIAP_TEST=1`; a normal build has none of them.
 
 | # | Step | Pass when |
 |---|---|---|
@@ -106,7 +110,7 @@ by scanning (`netsh wlan show networks mode=bssid`), and association, DHCP and t
 | C1 | `AP PASS`, `AP ON min=15` | `ap.state=on`, SSID `LGS-Chest-Std-11` WPA2 seen in a scan, Modbus over the LAN unaffected |
 | C2 | `AP OFF`, then 50 x ON/OFF | every cycle on and off, no reset, `ap.heap` stable |
 | C3 | AP on during a TCP soak and the event collector | 0 failed reads, 0 resets |
-| D1 | `GET /` from the LAN | dropped (no page on the LAN) |
+| D1 | `GET /` from the LAN | no answer, connection closed (`tcp_close p=1`) |
 | D2 | SWEEP over the console | 40/40 ok on Std-11 |
 | E | Overnight: AP on (min=480) + soak | 0 watchdog resets, `sys.up` grows, soak clean |
 | P | Morning, with a phone | joins, gets 192.168.77.x, page loads, Status/Log/Modules/Network work |

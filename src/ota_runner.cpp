@@ -136,14 +136,16 @@ static uint32_t _seq = 0, _startEpoch = 0, _endEpoch = 0;
 // modules only inside [at, until) of the gateway's wall clock (which may wrap midnight), never within WIN_RESET_AFTER_S of
 // a scheduled shelf reset (the reset power-cycles every module and ends a staging session) and never closer than
 // WIN_BUDGET_S to the window's end or to the next reset (a group takes minutes and is not left half done). A group already
-// in flight is finished. After `nights` windows have closed the run ends, with whatever is left recorded as such; ABORT
+// in flight is finished. Without `nights` the run goes on night after night until nothing is left to do (a module that
+// cannot be updated is given up on after its tries, so that always comes); with `nights=N` it ends after N windows with
+// whatever is left recorded as such; ABORT
 // ends it at any time. The run itself lives in RAM, so a gateway reboot ends it as before (the record says interrupted).
 #define WIN_BUDGET_S      600UL
 #define WIN_RESET_AFTER_S 180UL
 #define WIN_MAX_NIGHTS    14
 static bool     _winOn = false, _winPrev = false;
 static uint32_t _winAtS = 0, _winUntilS = 0;      // seconds after midnight
-static uint8_t  _nights = 1, _nightsDone = 0;
+static uint16_t _nights = 0, _nightsDone = 0;     // _nights 0 = no limit
 
 static uint32_t secOfDay() { return sched_now() % 86400UL; }
 
@@ -165,7 +167,7 @@ static bool windowOpen() {
 }
 
 // Every window the run asked for has opened and closed.
-static bool windowsExhausted() { return _winOn && _nightsDone >= _nights && !inWindow(); }
+static bool windowsExhausted() { return _winOn && _nights != 0 && _nightsDone >= _nights && !inWindow(); }
 
 // May a new group be started now? Room enough left in the window and before the next reset.
 static bool groupMayStart() {
@@ -775,16 +777,17 @@ static void cmdStart(char** argv, int argc, bool armed, void (*emit)(const char*
     _applyQuietMs = (uint32_t)applyQuiet * 1000UL;
     _groupMax = (uint8_t)group;
 
-    // Optional night window: at= and until= together (HHMM on the gateway's wall clock), nights= how many windows to use.
+    // Optional night window: at= and until= together (HHMM on the gateway's wall clock); nights= limits how many windows
+    // are used, and without it the run goes on every night until it is done.
     const char* atV = kv(argv, argc, "at");
     const char* untilV = kv(argv, argc, "until");
     bool winOn = false;
     uint32_t atS = 0, untilS = 0;
-    long nights = 1;
+    long nights = 0;
     if (atV || untilV) {
         long a, u;
         if (!atV || !untilV || !hhmmArg(atV, a) || !hhmmArg(untilV, u) || a == u) { emit("#ERR OTA err=syntax want=at=HHMM_until=HHMM"); return; }
-        if (!numArg(kv(argv, argc, "nights"), 1, WIN_MAX_NIGHTS, 1, nights)) { emit("#ERR OTA err=range key=nights allowed=1-14"); return; }
+        if (!numArg(kv(argv, argc, "nights"), 1, WIN_MAX_NIGHTS, 0, nights)) { emit("#ERR OTA err=range key=nights allowed=1-14"); return; }
         winOn = true;
         atS = (uint32_t)(a / 100) * 3600UL + (uint32_t)(a % 100) * 60UL;
         untilS = (uint32_t)(u / 100) * 3600UL + (uint32_t)(u % 100) * 60UL;
@@ -808,11 +811,18 @@ static void cmdStart(char** argv, int argc, bool armed, void (*emit)(const char*
     writeRecord(RES_RUNNING);
     note(1, n);
     if (_winOn)
-        out(emit, "#OK OTA START run=%lu image=%s size=%lu modules=%u window=%04lu-%04lu nights=%ld", (unsigned long)_seq, _imgName,
+        out(emit, "#OK OTA START run=%lu image=%s size=%lu modules=%u window=%04lu-%04lu nights=%s", (unsigned long)_seq, _imgName,
             (unsigned long)_imgSize, n, (unsigned long)((_winAtS / 3600) * 100 + (_winAtS % 3600) / 60),
-            (unsigned long)((_winUntilS / 3600) * 100 + (_winUntilS % 3600) / 60), nights);
+            (unsigned long)((_winUntilS / 3600) * 100 + (_winUntilS % 3600) / 60), nights ? "limited" : "until_done");
     else
         out(emit, "#OK OTA START run=%lu image=%s size=%lu modules=%u", (unsigned long)_seq, _imgName, (unsigned long)_imgSize, n);
+}
+
+static const char* nightsText() {             // "3" or "-" (no limit)
+    static char b[6];
+    if (_nights == 0) return "-";
+    snprintf(b, sizeof(b), "%u", (unsigned)_nights);
+    return b;
 }
 
 // Between windows: nothing in flight and nothing may start (this is what a window run looks like all day).
@@ -825,8 +835,8 @@ static void cmdStatus(void (*emit)(const char*)) {
         out(emit, "#DATA state=%s run=%lu phase=%s ch=%u group=%u chunk=%u/%u", holding() ? "scheduled" : "running", (unsigned long)_seq,
             phaseName(_ph), _grpCh, _grpN, (unsigned)_idx, (unsigned)_total);
         if (_winOn)
-            out(emit, "#DATA window=%04lu-%04lu nights=%u/%u gate=%s", (unsigned long)((_winAtS / 3600) * 100 + (_winAtS % 3600) / 60),
-                (unsigned long)((_winUntilS / 3600) * 100 + (_winUntilS % 3600) / 60), (unsigned)_nightsDone, (unsigned)_nights,
+            out(emit, "#DATA window=%04lu-%04lu nights=%u/%s gate=%s", (unsigned long)((_winAtS / 3600) * 100 + (_winAtS % 3600) / 60),
+                (unsigned long)((_winUntilS / 3600) * 100 + (_winUntilS % 3600) / 60), (unsigned)_nightsDone, nightsText(),
                 !inWindow() ? "closed" : sched_resetNear(WIN_BUDGET_S, WIN_RESET_AFTER_S) ? "reset_hold" : groupMayStart() ? "open" : "ending");
         uint32_t paused = _pausedSince ? (now_() - _pausedSince) / 1000 : 0;
         out(emit, "#DATA paused_s=%lu paused_total_s=%lu quiet_s=%lu restarts=%lu", (unsigned long)paused,

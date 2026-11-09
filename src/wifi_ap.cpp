@@ -526,6 +526,18 @@ void wifiAp_command(char** argv, int argc, bool armed, void (*emit)(const char*)
         emit("#OK AP OFF");
         return;
     }
+    if (!strcasecmp(sub, "SHOW")) {
+        // The one place the password is read back: the person holding a session can already SET it (AP PASS), so showing
+        // it adds nothing an attacker on the console lacks, and it is what lets a technician see what the cabinet is
+        // configured with. Needs HELLO; never part of STATUS/INFO.
+        char ssid[40], pass[AP_PASS_MAX + 2];
+        apSsid(ssid, sizeof(ssid));
+        if (!loadPass(pass, sizeof(pass))) pass[0] = 0;
+        out(emit, "#DATA ap.ssid=%s ap.pass=%s ap.ip=192.168.27.1 ap.url=http://192.168.27.1:502/", ssid, pass[0] ? pass : "-");
+        memset(pass, 0, sizeof(pass));
+        emit("#OK AP SHOW");
+        return;
+    }
     if (!strcasecmp(sub, "PASS")) {
         if (argc < 2) { emit("#ERR AP err=syntax want=PASS_<8-31_chars>"); return; }
         const char* p = argv[1];
@@ -548,5 +560,5 @@ void wifiAp_command(char** argv, int argc, bool armed, void (*emit)(const char*)
         out(emit, "#OK AP SSID stored=1 ssid=%s note=applies_at_next_AP_ON", cur);
         return;
     }
-    emit("#ERR AP err=syntax want=STATUS|ON|OFF|PASS|SSID");
+    emit("#ERR AP err=syntax want=STATUS|ON|OFF|PASS|SSID|SHOW");
 }

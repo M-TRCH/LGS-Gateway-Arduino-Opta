@@ -100,7 +100,7 @@ $LGS SET key=value ...        # staged only
 $LGS SAVE | DISCARD | DEFAULTS | REBOOT
 $LGS RESYNC [0|1]             # volatile: broadcast re-sync + one retry after a missing RS485 reply (default 1 at every boot)
 $LGS EXC [0|1]                # volatile: answer an RS485 timeout with Modbus exception 0x0B at once (default 0)
-$LGS AP [ON [min=N] [bridge=0|1] | OFF | PASS <8-31 chars> | SSID <1-31 chars>|default]   # service Wi-Fi AP (SSID default LGS-<sys.name>, applies at next ON); ON/OFF/PASS/SSID need HELLO
+$LGS AP [ON [min=N] [bridge=0|1] | OFF | PASS <8-31 chars> | SSID <1-31 chars>|default | SHOW]   # service Wi-Fi AP (SSID default LGS-<sys.name>, applies at next ON); ON/OFF/PASS/SSID/SHOW need HELLO (SHOW prints name+password)
 $LGS SWEEP START [ids=..|all] | STATUS | STOP                  # read-only module walk, no HELLO
 $LGS MOD <id> LIGHT|UNLOCK|OFF                                 # one coil to one module (needs HELLO; refused during a SWEEP); the service page's module buttons
 ```

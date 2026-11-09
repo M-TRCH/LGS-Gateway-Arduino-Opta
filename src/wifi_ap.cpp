@@ -184,6 +184,7 @@ uint8_t wifiAp_fwData(uint32_t offset, const uint8_t* data, int len, uint32_t& r
 #define AP_PASS_KEY       "ap"
 #define AP_PASS_MIN       8
 #define AP_PASS_MAX       31
+#define AP_MIN_KEY        "apm"        // stored default idle minutes (decimal text); nothing stored = AP_DEF_MIN
 #define AP_SSID_KEY       "apn"        // stored name; "-" (or nothing stored) = the default LGS-<sys.name>
 #define AP_SSID_MAX       31
 
@@ -211,6 +212,17 @@ static bool loadPass(char* out, size_t cap) {
     if (!gwStore_auxGet(AP_PASS_KEY, out, cap - 1, &len) || len < AP_PASS_MIN || len > AP_PASS_MAX) return false;
     out[len] = 0;
     return true;
+}
+
+// How long the AP stays up with nobody using it, when the request does not say: the stored value, else AP_DEF_MIN.
+// Used by `AP ON` without min= and by the panel button, so a technician's setting holds for both.
+static uint16_t storedMin() {
+    char b[8];
+    size_t len = 0;
+    if (!gwStore_auxGet(AP_MIN_KEY, b, sizeof(b) - 1, &len) || len < 1 || len > 3) return AP_DEF_MIN;
+    b[len] = 0;
+    const long v = strtol(b, nullptr, 10);
+    return (v >= 1 && v <= AP_MAX_MIN) ? (uint16_t)v : AP_DEF_MIN;
 }
 
 // The name the AP broadcasts: the stored one, else LGS-<sys.name>.
@@ -310,7 +322,7 @@ void wifiAp_update() {
 void wifiAp_panelToggle() {
     _who = 2;
     if (_ap == AP_ON) _wantOff = true;
-    else { _idleMin = AP_DEF_MIN; _bridge = false; _wantOn = true; }
+    else { _idleMin = storedMin(); _bridge = false; _wantOn = true; }
 }
 
 // ── Console ────────────────────────────────────────────────────────────────
@@ -509,7 +521,7 @@ void wifiAp_command(char** argv, int argc, bool armed, void (*emit)(const char*)
 #endif
     if (!strcasecmp(sub, "ON")) {
         const char* v = kv(argv + 1, argc - 1, "min");
-        const long m = v ? strtol(v, nullptr, 10) : AP_DEF_MIN;
+        const long m = v ? strtol(v, nullptr, 10) : storedMin();
         if (m < 1 || m > AP_MAX_MIN) { emit("#ERR AP err=range key=min allowed=1-480"); return; }
         v = kv(argv + 1, argc - 1, "bridge");
         const char* why = refuseReason();
@@ -533,7 +545,7 @@ void wifiAp_command(char** argv, int argc, bool armed, void (*emit)(const char*)
         char ssid[40], pass[AP_PASS_MAX + 2];
         apSsid(ssid, sizeof(ssid));
         if (!loadPass(pass, sizeof(pass))) pass[0] = 0;
-        out(emit, "#DATA ap.ssid=%s ap.pass=%s ap.ip=192.168.27.1 ap.url=http://192.168.27.1:502/", ssid, pass[0] ? pass : "-");
+        out(emit, "#DATA ap.ssid=%s ap.pass=%s ap.ip=192.168.27.1 ap.url=http://192.168.27.1:502/ ap.min=%u", ssid, pass[0] ? pass : "-", (unsigned)storedMin());
         memset(pass, 0, sizeof(pass));
         emit("#OK AP SHOW");
         return;
@@ -548,6 +560,17 @@ void wifiAp_command(char** argv, int argc, bool armed, void (*emit)(const char*)
         emit("#OK AP PASS stored=1");          // never echoed back
         return;
     }
+    if (!strcasecmp(sub, "MIN")) {
+        if (argc != 2) { emit("#ERR AP err=syntax want=MIN_<1-480>"); return; }
+        char* e;
+        const long m = strtol(argv[1], &e, 10);
+        if (*e || m < 1 || m > AP_MAX_MIN) { emit("#ERR AP err=range key=min allowed=1-480"); return; }
+        char b[8];
+        const int n = snprintf(b, sizeof(b), "%ld", m);
+        if (!gwStore_auxSet(AP_MIN_KEY, b, (size_t)n)) { emit("#ERR AP err=storage"); return; }
+        out(emit, "#OK AP MIN stored=1 min=%ld note=default_for_AP_ON_and_the_panel_button", m);
+        return;
+    }
     if (!strcasecmp(sub, "SSID")) {
         if (argc != 2) { emit("#ERR AP err=syntax want=SSID_<1-31_chars_no_spaces>|default"); return; }
         const char* p = !strcasecmp(argv[1], "default") ? "-" : argv[1];
@@ -560,5 +583,5 @@ void wifiAp_command(char** argv, int argc, bool armed, void (*emit)(const char*)
         out(emit, "#OK AP SSID stored=1 ssid=%s note=applies_at_next_AP_ON", cur);
         return;
     }
-    emit("#ERR AP err=syntax want=STATUS|ON|OFF|PASS|SSID|SHOW");
+    emit("#ERR AP err=syntax want=STATUS|ON|OFF|PASS|SSID|SHOW|MIN");
 }

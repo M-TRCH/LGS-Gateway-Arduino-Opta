@@ -55,7 +55,7 @@ phone holds a slot for milliseconds.
   `test/wifi_fw_install.py` (extracts the image from `libmbed.a` with the toolchain's `objcopy`).
 
 ### Turning it on and off
-- `$LGS AP ON [min=N] [bridge=0|1]`, `$LGS AP OFF`, `$LGS AP` (status), `$LGS AP PASS <8-31 chars>`, `$LGS AP SHOW` (HELLO; name, password and URL, the only read-back of the password), `$LGS AP SSID <1-31 chars>|default` (aux key `apn`, no spaces; default LGS-<sys.name>). ON, OFF and PASS need
+- `$LGS AP ON [min=N] [bridge=0|1]`, `$LGS AP OFF`, `$LGS AP` (status), `$LGS AP PASS <8-31 chars>`, `$LGS AP MIN <1-480>` (stored default idle minutes for `AP ON` without min= and the panel button, aux key `apm`), `$LGS AP SHOW` (HELLO; name, password and URL, the only read-back of the password), `$LGS AP SSID <1-31 chars>|default` (aux key `apn`, no spaces; default LGS-<sys.name>). ON, OFF and PASS need
   HELLO. Volatile: nothing about the AP survives a reboot except the password.
 - **Front panel**: a new panel action `service_ap` (code 7) toggles it. (The earlier plan's BTN_USER hold needs the
   boot-button fix below first; that is a separate change.)

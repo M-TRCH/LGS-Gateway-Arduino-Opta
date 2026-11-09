@@ -8,6 +8,7 @@
 
 #include "config.h"
 #include "gw_config.h"
+#include "gw_console.h"
 #include "gw_status.h"
 #include "modbus_rtu.h"
 #include "panel.h"
@@ -100,6 +101,34 @@ static void out(void (*emit)(const char*), const char* fmt, ...) {
     vsnprintf(_ln, sizeof(_ln), fmt, ap);
     va_end(ap);
     emit(_ln);
+}
+
+// MOD <id> LIGHT|UNLOCK|OFF: one command to one module, for the service page and a technician's laptop. LIGHT lights the
+// ring and number of the panel preset (coil 1010+p, stays lit until OFF), UNLOCK is the unlock combo (1030+p, the latch
+// pulses and clears itself), OFF is the module's own all-off (511). Needs HELLO like every other write, never runs while
+// a SWEEP walks the bus, and is sent without the heal retry (this path is also reachable from the USB console).
+void modCommand(char** argv, int argc, void (*emit)(const char*)) {
+    if (!gwConsole_armed()) { emit("#ERR MOD err=locked hint=HELLO"); return; }
+    if (argc != 2) { emit("#ERR MOD err=syntax want=<id>_LIGHT|UNLOCK|OFF"); return; }
+    const long id = strtol(argv[0], nullptr, 10);
+    if (id < 11 || id > 108 || id % 10 < 1 || id % 10 > 8) { emit("#ERR MOD err=range key=id allowed=11-108"); return; }
+    if (_run) { emit("#ERR MOD err=busy detail=sweep_running"); return; }
+    const uint16_t p = gwConfig_active().panel_preset >= 1 && gwConfig_active().panel_preset <= 8 ? gwConfig_active().panel_preset : 1;
+    uint16_t coil;
+    if (!strcasecmp(argv[1], "LIGHT")) coil = 1010 + p;
+    else if (!strcasecmp(argv[1], "UNLOCK")) coil = 1030 + p;
+    else if (!strcasecmp(argv[1], "OFF")) coil = 511;
+    else { emit("#ERR MOD err=syntax want=<id>_LIGHT|UNLOCK|OFF"); return; }
+    uint8_t tx[8] = {(uint8_t)id, 0x05, (uint8_t)(coil >> 8), (uint8_t)(coil & 0xFF), 0xFF, 0x00, 0, 0};
+    const uint16_t c = crc16(tx, 6);
+    tx[6] = (uint8_t)(c & 0xFF);
+    tx[7] = (uint8_t)(c >> 8);
+    uint8_t rx[RTU_BUF_SIZE];
+    const int n = rtu_transact(tx, 8, rx, 0);
+    gwStatus_pulseRs485();
+    const bool ok = n >= 8 && rx[0] == id && rx[1] == 0x05 && verifyCRC(rx, n);
+    if (!ok) { out(emit, "#ERR MOD err=no_reply id=%ld", id); return; }
+    out(emit, "#OK MOD id=%ld %s coil=%u", id, argv[1], (unsigned)coil);
 }
 
 void modSweep_command(char** argv, int argc, void (*emit)(const char*)) {

@@ -11,5 +11,7 @@
 void modSweep_update();
 bool modSweep_running();
 void modSweep_command(char** argv, int argc, void (*emit)(const char* line));
+// $LGS MOD <id> LIGHT|UNLOCK|OFF (HELLO required): one coil to one module.
+void modCommand(char** argv, int argc, void (*emit)(const char* line));
 
 #endif // MOD_SWEEP_H

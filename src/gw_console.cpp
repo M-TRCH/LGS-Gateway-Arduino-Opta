@@ -320,7 +320,7 @@ static void doLog(char** argv, int argc) {
 }
 
 static void doHelp() {
-    emit("#DATA verbs=PING,INFO,HELP,GET,HELLO,BYE,SET,SAVE,DISCARD,DEFAULTS,REBOOT,LAMP,TIME,LOG,RESYNC,EXC,OTA,AP,SWEEP");
+    emit("#DATA verbs=PING,INFO,HELP,GET,HELLO,BYE,SET,SAVE,DISCARD,DEFAULTS,REBOOT,LAMP,TIME,LOG,RESYNC,EXC,OTA,AP,SWEEP,MOD");
     emit("#DATA note=SET/SAVE/DISCARD/DEFAULTS/REBOOT and RESYNC/EXC with a value need HELLO first; RESYNC/EXC are volatile (default RESYNC=1 EXC=0 at every boot)");
     for (int i = 0; i < gwConfig_keyCount(); i++) {
         emitf("#DATA key=%s%s%s", gwConfig_keyName(i),
@@ -427,6 +427,7 @@ static void dispatch(char* body) {
     else if (strcasecmp(verb, "OTA")  == 0) otaRunner_command(rest, restN, gwConsole_armed(), emit);
     else if (strcasecmp(verb, "AP")   == 0) wifiAp_command(rest, restN, gwConsole_armed(), emit);
     else if (strcasecmp(verb, "SWEEP") == 0) modSweep_command(rest, restN, emit);
+    else if (strcasecmp(verb, "MOD") == 0) modCommand(rest, restN, emit);
     else if (strcasecmp(verb, "RESYNC") == 0) doToggle("RESYNC", rest, restN, rtu_healEnabled, rtu_setHeal);
     else if (strcasecmp(verb, "EXC")    == 0) doToggle("EXC", rest, restN, tcpBridge_exceptionEnabled, tcpBridge_setException);
     else if (strcasecmp(verb, "GET")  == 0) {

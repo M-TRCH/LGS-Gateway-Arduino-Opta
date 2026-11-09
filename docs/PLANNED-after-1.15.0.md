@@ -58,6 +58,18 @@ row 10, where the board (module 104) sat.
 - **Test:** Std-11, a board at 247 on row 5's channel with the hub parked on row 10: FIND 53 finds it, SETID 247 → 53
   succeeds.
 
+## Still open, not code (as of 2026-11-10)
+
+- **Site rollout:** only Chest-Std-11 runs 1.15.0; the other 11 bench cabinets were on 1.14.0 at release. Flash the
+  release asset (`gateway_opta_v1.15.0.bin`), then check INFO `fw=1.15.0` and the `build=` date and that the settings came
+  through (schema 11, unchanged). A gateway update reboots the board and power-cycles the shelf: not during a soak.
+- **Soak conditions for the checkpoint:** not defined yet (see the Test Tool's `docs/PLANNED-site-simulation-soak.md`).
+- **Tests that need a person at the cabinet:** the three-tab page from a phone, the panel action 7 press, the 0x0A
+  refusal seen by a phone, an overnight run with the AP on.
+- **Boot-button bug** (`sampleBootButton()` takes `idle` from the first sample): needs a unit on USB.
+- **Decided against for now:** a captive portal (no lwIP socket left for DNS and port 80); a configurable AP subnet (only
+  if a site's LAN uses 192.168.27.0/24).
+
 ## Also found (lower priority)
 
 - `wifi_ap.cpp` wFinish removes the old `4343WA1.BIN` before renaming the verified temp file: a failed rename leaves no

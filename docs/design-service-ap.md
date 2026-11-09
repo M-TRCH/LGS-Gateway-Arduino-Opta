@@ -55,16 +55,18 @@ phone holds a slot for milliseconds.
   `test/wifi_fw_install.py` (extracts the image from `libmbed.a` with the toolchain's `objcopy`).
 
 ### Turning it on and off
-- `$LGS AP ON [min=N] [bridge=0|1]`, `$LGS AP OFF`, `$LGS AP` (status), `$LGS AP PASS <8-31 chars>`, `$LGS AP MIN <1-480>` (stored default idle minutes for `AP ON` without min= and the panel button, aux key `apm`), `$LGS AP SHOW` (HELLO; name, password and URL, the only read-back of the password), `$LGS AP SSID <1-31 chars>|default` (aux key `apn`, no spaces; default LGS-<sys.name>). ON, OFF and PASS need
-  HELLO. Volatile: nothing about the AP survives a reboot except the password.
+- `$LGS AP ON [min=N] [bridge=0|1]`, `$LGS AP OFF`, `$LGS AP` (status), `$LGS AP PASS <8-31 chars>`, `$LGS AP MIN <1-480>` (stored default idle minutes for `AP ON` without min= and the panel button, aux key `apm`), `$LGS AP SHOW` (HELLO; name, password and URL, the only read-back of the password), `$LGS AP SSID <1-31 chars>|default` (aux key `apn`, no spaces; default LGS-<sys.name>). Everything but the status needs
+  HELLO. Stored (aux keys beside the config blob): the password `ap`, the name `apn`, the default minutes `apm`. The on/off
+  state itself is volatile: the AP never comes back by itself after a reboot.
 - **Front panel**: a new panel action `service_ap` (code 7) toggles it. (The earlier plan's BTN_USER hold needs the
   boot-button fix below first; that is a separate change.)
 - Refused unless `hw.wifi=1`, `wifi.fw=ok` and a password is set. `beginAP` is never called at boot.
 - Start runs from `loop()`, not from the console handler: kick, **stretch the IWDG to ~32.7 s**, pause NTP,
-  `WiFi.config(192.168.27.1/24)`, `WiFi.beginAP("LGS-<sys.name>", pass, 6)`, restore the watchdog to `sys.wdt_ms`, kick.
+  `WiFi.config(192.168.27.1/24)`, `WiFi.beginAP(<stored name, else "LGS-<sys.name>">, pass, 6)`, restore the watchdog to `sys.wdt_ms`, kick.
   A hang inside the driver is therefore a reset after 32 s, never a dead unit; and since the AP is never on at boot it
   cannot loop.
-- Off by: `AP OFF`, the panel action again, `min` minutes (default 30, at most 480) with no AP client, a reboot.
+- Off by: `AP OFF`, the panel action again, N minutes with no AP client (N = the request's `min=`, else the stored
+  `AP MIN`, else 30; at most 480; the panel button always uses the stored value), a reboot.
 - LED_D1 blinks at 1 Hz while the AP is up (every other LED is taken).
 
 ### Credentials
@@ -74,11 +76,15 @@ phone holds a slot for milliseconds.
 ### What an AP client may do
 - **Console page and the unit 255 tunnel**: always (the console's own HELLO gate still applies to writes).
 - **Modbus bridge to the modules** (any other unit): refused with exception 0x0A for AP clients unless `AP ON bridge=1`.
+  Known gap in 1.15.0: the console verb `MOD <id> UNLOCK` is not covered by this rule, so the page can unlock a drawer
+  with bridge=0 (docs/PLANNED-after-1.15.0.md, item 2).
 - Told apart by the client's address (192.168.27.0/24). `net.ip` inside that subnet is refused by the validator.
 
 ### The page (served on port 502 to AP clients)
-- `GET /` one inline HTML file (< 10 KB): **Status** (INFO), **Log** (LOG 20), **Modules** (SWEEP), **Network**
-  (sys.name, net.dhcp/ip/mask/gw/dns/ntp: HELLO, SET, SAVE, then REBOOT with a confirm).
+- `GET /` one inline HTML file (about 10 KB, the Test Tool's colours, system fonts): **Gateway** (status from INFO, and
+  sys.name, net.dhcp/ip/mask/gw/dns/ntp, time.tz_min: HELLO, SET, SAVE; REBOOT with a confirm), **Events** (LOG 60, filter
+  by type) and **Modules** (SWEEP on opening the tab: id, type, firmware, ok/slow/silent; tap a row for LIGHT / UNLOCK
+  (confirm) / OFF through `MOD`; a "new board" card runs `MOD FIND` and `MOD <246|247> SETID <new>`).
 - `GET /api?l=<console line>` runs one `$LGS` line through `gwConsole_execute()` and returns its lines as text/plain.
   Same 1-120 printable-character gate as the unit 255 tunnel. Anything else: 404.
 
@@ -91,7 +97,8 @@ phone holds a slot for milliseconds.
 ### Events and INFO
 - Events (appended): `GW_EV_AP = 20` (aux 1 on (param = who: 1 console, 2 panel), 2 off (param = minutes up),
   3 start failed, 4 refused (param = why)), `GW_EV_WIFI_FW = 21` (aux 1 installed, 2 CRC mismatch).
-- `INFO`: `ap.state=off|starting|on|failed ap.clients=n ap.left_s=n ap.bridge=0|1 ap.heap=<free bytes>`.
+- `INFO`: `hw.otp hw.wifi hw.rs485 hw.pid wifi.fw` and `ap.state=off|starting|on|failed ap.left_s ap.bridge ap.start_ms
+  ap.starts ap.fails heap.used`. `AP` (status) adds `ap.ssid ap.ip ap.client` while it is on.
 
 ## Test plan on Chest-Std-11 (network only: there is no USB Opta on this PC)
 
@@ -115,12 +122,26 @@ near the cabinet (`AP PROBE` on a second gateway does it end to end). `AP SCAN`,
 | E | Overnight: AP on (min=480) + soak | 0 watchdog resets, `sys.up` grows, soak clean |
 | P | Morning, with a phone | joins, gets 192.168.27.x, page loads, Status/Log/Modules/Network work |
 
+## Status at the v1.15.0 release (2026-11-10)
+
+Proven on Chest-Std-11: A1/A2 (hw.wifi=1), B1 (radio file installed over the network, 421,098 B in 45 s, refused while
+the AP is up), C1/C2 (50 ON/OFF cycles, flat heap), C3 (34,576 LAN reads during an AP session, 0 failed), D1, D2 (40/40),
+and P with the earlier page layout (real phones joined, got 192.168.77.x then, loaded the page). Also: AP SSID / PASS /
+MIN / SHOW, the move to 192.168.27.0/24, `MOD LIGHT/OFF` and `SETID` (247 -> 104, an id in use refused) through the
+current page served by a LAN proxy against the gateway's own `/api`, and a 49 h fleet soak with this code on Std-11
+(AP off, 0 failed reads).
+
+Not proven: E (overnight with the AP on), the current three-tab page from a phone, the panel action 7 press, the 0x0A
+refusal seen by a real phone client, SETID on a board behind another hub channel (known not to work, see the plan).
+Known limits and their fixes: docs/PLANNED-after-1.15.0.md.
+
 ## Not in this change
 
 - The boot-button bug (`sampleBootButton()` takes `idle` from the first sample, so a hold at power-up is never seen):
   fixing it changes what a held button does at boot, and on a remote-only bench a wrong read would force defaults and
   take Ethernet off. Fix it with a unit on USB.
-- Test Tool support (install button, AP password, status): after the firmware side is proven.
+- Test Tool support: done in Test Tool 2.1.0 (Gateway > AP Service: name, password, minutes, on/off; config
+  export/import; the "Standard + AP Service" sticker). The radio-file install has no Test Tool button yet (script only).
 
 ## Risks
 

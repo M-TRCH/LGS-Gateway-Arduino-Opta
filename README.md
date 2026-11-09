@@ -30,6 +30,9 @@ Each button runs its action across the whole cabinet, one slot at a time from `l
 | `2` all_off | Everything out |
 | `3` all_unlock | Ring + number + latch on every slot |
 | `4` reset | Drops the shelf's power for `panel.reset_ms` — a power cycle |
+| `5` lamp_test | The status lamps one by one (wiring check) |
+| `6` all_8 | All eight windows of every slot (mask cabinets, module fw ≥ 3.5.0) |
+| `7` service_ap | Service Wi-Fi on / off (v1.15, Opta WiFi only; see below). Not a sweep, nothing on the bus |
 
 Defaults follow the cabinet as built: red = all_on, green = all_off, blue = all_unlock, white = reset, yellow unassigned. `panel.enabled` is **off** by default, so a bench unit with nothing wired to its inputs cannot sweep somebody's cabinet.
 
@@ -144,6 +147,22 @@ The USB bridge is untouched: a PC master does its own timing and must never rece
 
 Volatile console switches (reset at every boot, `HELLO` needed to change): `$LGS RESYNC 0|1` (default 1) and `$LGS EXC 0|1` (default 0 — with 1, a missing reply answers with Modbus exception 0x0B immediately instead of letting the master time out). `$LGS INFO` shows `rtu.heal`, `rtu.resync`, `rtu.retry_ok`, `rtu.retry_fail`, `rtu.bad_crc`, `rtu.bad_other`, `tcp.exc`. First-try misses are `cnt.rs485_timeout + rtu.retry_ok`.
 
+## Background module update (v1.14) and its time window (v1.15)
+
+The gateway updates its own modules: `$LGS OTA START slot=<0-3> [ids=…]` takes a module image from its **depot** (up to four images on the OTA partition, stored over the network by the Test Tool), stages modules in small groups whenever nobody else has used the bus for a few seconds, and reboots each module into the new firmware only when the bus and that module are quiet and its poller's rhythm says the next request is at least 8 s away. No PC needs to stay connected; the last two runs are kept with their results. The cabinet's status lamps stay lit while it runs. With **`at=HHMM until=HHMM`** (v1.15) it starts groups and reboots modules only inside that daily window on its own clock (it may wrap midnight), keeps clear of the scheduled shelf reset, and without `nights=N` goes on every day until it is done — start it in the daytime and leave. `OTA STATUS` / `RESULT` / `ABORT`; the design is in `docs/design-gateway-ota.md`.
+
+## Service Wi-Fi at the cabinet (v1.15, Opta WiFi only)
+
+An Opta WiFi (AFX00002) can open its own access point for a technician standing at the cabinet. It is **off by default and never starts at boot**; it is switched on from the console (`$LGS AP ON [min=N]`), the Test Tool (Gateway › AP Service) or a front-panel button set to action 7, and goes off by itself after N minutes with nobody connected (`AP MIN`, default 30). Name (`AP SSID`, default `LGS-<sys.name>`), password (`AP PASS`, 8–31 characters, required) and minutes are stored beside the settings, not in them, so no schema change and no lost settings; `AP SHOW` prints them (needs `HELLO`).
+
+- The AP is **`192.168.27.1/24`**; a phone on it opens **`http://192.168.27.1:502/`**: *Gateway* (status, network settings), *Events* (newest 60, filter by type) and *Modules* (every slot with its type and firmware; tap one to light it, switch it off or unlock it; find a new board at id 246/247 and give it its id).
+- AP clients reach the console (unit 255) but **not the Modbus bridge** — exception 0x0A — unless the AP was started with `bridge=1`.
+- While the AP is up NTP pauses: lwIP has four sockets and the AP's DHCP server takes the one NTP uses.
+- The radio needs `/wlan/4343WA1.BIN` on QSPI partition 1; a unit without it reports `wifi.fw=missing` and refuses `AP ON`. It can be installed over the network (unit 255 / FC 0x41 subfunctions 0x30–0x32, `test/wifi_fw_install.py`). Never run Arduino's `WiFiFirmwareUpdater` on a gateway: it erases the event log.
+- A board without the radio refuses `AP ON` (`detail=no_radio`) and is otherwise unchanged.
+
+Known limits of 1.15.0, planned for the next version (`docs/PLANNED-after-1.15.0.md`): a phone's connection that never closes can keep one of the two TCP client slots until the gateway restarts; the page's unlock button works even though the AP refuses Modbus to its clients (treat the AP password as a key to the cabinet); finding a new board (246/247) works only on the hub channel the hub is currently on. The design is in `docs/design-service-ap.md`.
+
 ## Console
 
 Text lines on the USB port, `$LGS ` prefixed, so the same cable carries Modbus and configuration without a mode switch.
@@ -157,6 +176,11 @@ $LGS SET key=value …  stage changes
 $LGS SAVE             validate, persist, apply live
 $LGS DISCARD | DEFAULTS | REBOOT | BYE
 $LGS RESYNC [0|1] | EXC [0|1]   volatile switches, see "Unanswered requests" above
+$LGS LOG SINCE <seq> [n]        records after seq, oldest first (for a collector)
+$LGS OTA START|STATUS|RESULT|ABORT …   background module update (above)
+$LGS AP [ON [min=N] [bridge=0|1] | OFF | PASS <p> | SSID <name>|default | MIN <n> | SHOW]
+$LGS SWEEP START [ids=…]|STATUS|STOP   read-only walk of the modules
+$LGS MOD <id> LIGHT|UNLOCK|OFF | MOD FIND | MOD <246|247> SETID <new>
 ```
 
 Write verbs need an armed session so a false positive from binary Modbus traffic can never mutate anything. `SAVE` reports which groups took effect (`applied=bus,panel`) and which keys need a reboot.
@@ -175,6 +199,8 @@ pio device monitor     # serial log @ 115200 baud (sys.log must be on)
 
 The Test Tool's Gateway tab can also flash a `.bin` over DFU, and prepare a factory-fresh Opta whose QSPI has no partition table.
 
+**Releases:** flash the `.bin` attached to the GitHub release (the Test Tool bundles the same file), not a local rebuild. The build string is `__DATE__`, so a rebuild on another day is a different file from the one that was tested.
+
 ## Project structure
 
 ```
@@ -189,7 +215,14 @@ src/tcp_bridge.cpp    Modbus TCP server and TCP↔RTU re-framing
 src/usb_bridge.cpp    USB→RS485 passthrough
 src/panel.cpp         Buttons, cabinet sweeps, relay outputs and lamps
 src/sched.cpp         Wall clock and the scheduled shelf reset
-src/gw_status.cpp     Counters, status LEDs, reset reason, OTP MAC
+src/gw_status.cpp     Counters, status LEDs, reset reason, OTP MAC and board info
+src/net_runtime.cpp   Ethernet bring-up, link polling, the TCP listener
+src/ntp.cpp           SNTP client
+src/event_log.cpp     The event-log ring on raw QSPI
+src/ota_runner.cpp    The background module update and its time window
+src/wifi_ap.cpp       Service Wi-Fi AP, radio-file check and network install
+src/ap_http.cpp       The service page and /api on port 502, for AP clients
+src/mod_sweep.cpp     SWEEP, MOD and SETID
 src/main.cpp          Setup ordering and the loop
 ```
 
@@ -212,6 +245,8 @@ Cloned from [`M-TRCH/LGS-Master`](https://github.com/M-TRCH/LGS-Master) branch `
 **นาฬิกาของ Opta ไม่มีแบตเตอรี่** เวลาหายทุกครั้งที่ไฟดับ ระบบจึงไม่ยิงตารางใดๆ จนกว่าจะมีคนตั้งเวลา (Test Tool ตั้งให้เองอัตโนมัติ) และนาฬิกาเก็บเวลาท้องถิ่น ไม่ใช่ UTC ตารางรีเซตตั้งได้ **4 ช่วงต่อวัน** ติ๊กเปิดเฉพาะช่วงที่ต้องการ ช่วงที่ปิดไว้ยังเก็บเวลาเดิม
 
 **watchdog** จะรีเซตบอร์ดถ้าเฟิร์มแวร์หยุดทำงานเกิน `sys.wdt_ms` (ค่าเริ่มต้น 8000 มิลลิวินาที) เริ่มทำงานตั้งแต่กลาง `setup()` จึงครอบคลุมช่วงรอลิงก์ Ethernet ที่เป็นจุดค้างได้จริง — และด้วยเหตุนี้ค่าที่ตั้งต้องมากกว่าเวลารอลิงก์ ไม่งั้นบอร์ดจะรีเซตตัวเองวนไม่จบ (ระบบตรวจให้แล้วตอน SAVE) การเปลี่ยนค่ามีผลเมื่อรีสตาร์ท เพราะ IWDG ของ STM32 ตั้งใหม่ระหว่างทำงานไม่ได้
+
+**v1.14–1.15: เกตเวย์อัปเดตโมดูลเอง และมี Wi-Fi หน้างาน** เกตเวย์เก็บไฟล์เฟิร์มแวร์โมดูลไว้ในตัวเองแล้วอัปเดตโมดูลเองเบื้องหลัง (`OTA START`) ส่งเฉพาะตอนบัสว่าง ไม่ต้องเปิดคอมค้างไว้ ตั้งให้ทำเฉพาะช่วงเวลาได้ (`at= until=`) และทำทุกวันจนเสร็จ ส่วน Opta รุ่นมี Wi-Fi เปิด AP ให้ช่างที่หน้าตู้ได้ (ปิดเป็นค่าเริ่มต้น เปิดจากคอนโซล, Test Tool หรือปุ่มหน้าตู้ action 7 ปิดเองเมื่อไม่มีคนใช้) ต่อ Wi-Fi แล้วเปิด `http://192.168.27.1:502/` ดูสถานะ เหตุการณ์ และโมดูลทั้งตู้ สั่งเปิดไฟ/ดับไฟ/ปลดล็อก และตั้งไอดีบอร์ดใหม่ (246/247) ได้ ข้อจำกัดที่ทราบแล้วและแผนแก้อยู่ใน `docs/PLANNED-after-1.15.0.md` — ถือรหัส Wi-Fi เป็นกุญแจตู้ และแฟลชด้วยไฟล์จาก GitHub release เท่านั้น ไม่ใช่ build ใหม่
 
 **ไม่มีคำตอบจากโมดูลหนึ่งครั้ง ทำให้ทั้งช่องเสียจังหวะได้** (บั๊กใน libmodbus ของโมดูลรุ่นก่อน 3.5.5: โมดูลทิ้ง frame ถัดไปทุกครั้งหลังเห็น frame ของตัวอื่น) เกตเวย์ v1.13 จึงส่ง broadcast อ่าน (unit 0 ไม่มีใครตอบ) เพื่อให้ทุกโมดูลกลับเข้าจังหวะ แล้วถามซ้ำ 1 ครั้ง และเปลี่ยนวิธีรอคำตอบให้ตัดเสียงสะท้อนของตัวรับส่งออกก่อน แล้วรอ byte แรกของคำตอบ 150 มิลลิวินาที ไม่ใช่ 20 (USB bridge ไม่ถูกแตะ) ตัวสวิตช์ `$LGS RESYNC` / `$LGS EXC` เป็นค่าชั่วคราว กลับค่าเริ่มต้นทุกครั้งที่บูต
 

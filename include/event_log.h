@@ -75,7 +75,9 @@ enum GwEvent : uint8_t {
                              // (param = id) / 4 a module applied (param = id << 8
                              // | 1 if the firmware changed) / 5 finished ok /
                              // 6 finished with failures (param = failed) /
-                             // 7 aborted (param = failed)
+                             // 7 aborted (param = failed) / 8 a night window
+                             // opened (param = its number) / 9 one closed
+                             // (param = modules not yet applied)
     // ---- v1.15.0: the service access point (wifi_ap) ----------------------
     GW_EV_AP           = 20, // aux = 1 on (param = 1 console / 2 panel) / 2 off
                              // (param = minutes up) / 3 start failed (param =

@@ -59,4 +59,9 @@ void sched_describeNext(char* out, size_t n);
 
 uint32_t sched_lastFireEpoch();     // 0 = has not fired since boot
 
+// Is the wall clock within `beforeS` seconds before, or `afterS` seconds after, any ARMED reset time? Ignores the days
+// mask on purpose (a day that does not fire is treated as one that might: the caller is keeping clear, not predicting).
+// False while the clock is unset or the schedule is off. The OTA night window uses it to stay out of the shelf's way.
+bool sched_resetNear(uint32_t beforeS, uint32_t afterS);
+
 #endif // SCHED_H

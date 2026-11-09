@@ -83,7 +83,7 @@ never reboots a module that was recently written.
 ## Console verbs (USB or the unit 255 tunnel; START and ABORT need HELLO)
 
 ```
-$LGS OTA START slot=<0-3> [ids=11-18,21 | all] [idle=5] [group=8] [apply_idle=5] [apply_quiet=300]
+$LGS OTA START slot=<0-3> [ids=11-18,21 | all] [idle=5] [group=8] [apply_idle=5] [apply_quiet=300] [at=HHMM until=HHMM [nights=N]]
 $LGS OTA STATUS      state, group/channel, phase, chunk progress, counts staged / applied / failed, paused-for seconds
 $LGS OTA RESULT [n]  the stored run n (0 = latest, 1 = the one before), one #DATA line per module
 $LGS OTA ABORT       sends the module abort coil to the group in session, then stops; verified modules keep waiting
@@ -92,10 +92,30 @@ $LGS OTA ABORT       sends the module abort coil to the group in session, then s
 gateway firmware stage is receiving, the slot is not a complete image or is larger than the module slot (61,440 B), the clock
 is unset (the record needs wall time), or the USB bridge has seen traffic in the last 60 s (an SMT PC owns that port).
 
+## Night window (v1.15.0): `at=HHMM until=HHMM [nights=N]`
+
+A pharmacy is busy all day: a module can only be rebooted when nobody is about to ask for it, and with a busy poller that moment
+may not come. The window says WHEN the runner may work, on the gateway's own wall clock (it may wrap midnight, `at=2200 until=0400`),
+so a Test Tool that started the run at 14:00 can be closed and the cabinet does the work at night by itself.
+
+- START arms the run; between windows it holds in `PH_PICK` (`OTA STATUS` shows `state=scheduled`, `gate=closed`), transmitting
+  nothing. Inside a window it works exactly as before (same bus rule, same apply rule).
+- **New groups** start only while at least 10 minutes of the window are left and no scheduled shelf reset is within the next 10
+  minutes; a group in flight is always finished. **Applies** (module reboots) happen only inside the window and not within
+  60 s before / 180 s after a shelf reset. The reset power-cycles every module and ends a staging session, which is why the
+  default 01:00-04:00 night needs the 03:00 reset stepped around: before it the runner stops starting groups, after it it goes on.
+  `gate=` in STATUS reads `open`, `ending` (too little left for a new group), `reset_hold` or `closed`.
+- `nights=N` (1-14, default 1) windows are used; a window that was open when START arrived counts as the first. When the last one
+  closes with work left, the run ends `failed` and the record shows what is left (`pending`, or `verified` = staged, not applied).
+  When everything is applied earlier, the run ends `ok` earlier.
+- Events (`ota`): aux 8 = a window opened (param = its number), 9 = one closed (param = modules not yet applied).
+- While a window run waits it holds the depot (no deposit or delete) and blocks a gateway firmware upload, as any run does; ABORT
+  releases both. A gateway reboot ends the run (`interrupted`) as before; the clock must be set at START and stay set.
+- `ota.state=scheduled` in INFO while it waits between windows, `running` while a group or an apply is in progress.
+
 ## Out of scope / later
 
 - Resuming a staging session across a gateway reboot (the record says `interrupted`; the operator starts again).
-- Scheduling the update for a time window (START takes the quiet-bus rule instead).
 - Tool UI: a card on the Firmware page to start on chosen cabinets, a status table polled from `OTA STATUS`, and a results
   view from `OTA RESULT`. Written after the firmware works on the bench.
 

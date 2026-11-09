@@ -113,6 +113,20 @@ void sched_describeNext(char* out, size_t n) {
 
 uint32_t sched_lastFireEpoch() { return _lastFire; }
 
+bool sched_resetNear(uint32_t beforeS, uint32_t afterS) {
+    if (!_enabled || !_slots || !_timeSet) return false;
+    const int32_t now = (int32_t)((uint32_t)time(nullptr) % 86400UL);
+    for (int s = 0; s < GW_SCHED_SLOTS; s++) {
+        if (!(_slots & (1u << s))) continue;
+        const int32_t at = (int32_t)(_hhmm[s] / 100) * 3600 + (int32_t)(_hhmm[s] % 100) * 60;
+        for (int d = -1; d <= 1; d++) {                       // the same minute yesterday, today, tomorrow: midnight wraps
+            const int32_t t = at + d * 86400;
+            if (now >= t - (int32_t)beforeS && now <= t + (int32_t)afterS) return true;
+        }
+    }
+    return false;
+}
+
 void sched_applyConfig() {
     const GwConfig& c = gwConfig_active();
     _enabled = c.sched_reset_enabled;

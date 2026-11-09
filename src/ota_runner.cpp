@@ -136,7 +136,7 @@ static uint32_t _seq = 0, _startEpoch = 0, _endEpoch = 0;
 // modules only inside [at, until) of the gateway's wall clock (which may wrap midnight), never within WIN_RESET_AFTER_S of
 // a scheduled shelf reset (the reset power-cycles every module and ends a staging session) and never closer than
 // WIN_BUDGET_S to the window's end or to the next reset (a group takes minutes and is not left half done). A group already
-// in flight is finished. Without `nights` the run goes on night after night until nothing is left to do (a module that
+// in flight is finished. Without `nights` the run goes on window after window (every day) until nothing is left to do (a module that
 // cannot be updated is given up on after its tries, so that always comes); with `nights=N` it ends after N windows with
 // whatever is left recorded as such; ABORT
 // ends it at any time. The run itself lives in RAM, so a gateway reboot ends it as before (the record says interrupted).

@@ -105,7 +105,7 @@ so a Test Tool that started the run at 14:00 can be closed and the cabinet does 
   60 s before / 180 s after a shelf reset. The reset power-cycles every module and ends a staging session, which is why the
   default 01:00-04:00 night needs the 03:00 reset stepped around: before it the runner stops starting groups, after it it goes on.
   `gate=` in STATUS reads `open`, `ending` (too little left for a new group), `reset_hold` or `closed`.
-- Without `nights` the run goes on night after night until nothing is left to do (a module that cannot be updated is given up on
+- Without `nights` the run goes on window after window (every day) until nothing is left to do (a module that cannot be updated is given up on
   after its tries, so the run always ends) or until ABORT; the Test Tool's "update at set times" popup sends no `nights`. With
   `nights=N` (1-14) only N windows are used; a window that was open when START arrived counts as the first, and when the last
   one closes with work left the run ends `failed` and the record shows what is left (`pending`, or `verified` = staged, not

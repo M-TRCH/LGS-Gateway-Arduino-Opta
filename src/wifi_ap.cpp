@@ -177,7 +177,7 @@ uint8_t wifiAp_fwData(uint32_t offset, const uint8_t* data, int len, uint32_t& r
 // ── The access point ───────────────────────────────────────────────────────
 #define AP_IP_A 192
 #define AP_IP_B 168
-#define AP_IP_C 77
+#define AP_IP_C 27
 #define AP_CHANNEL        6
 #define AP_DEF_MIN        30
 #define AP_MAX_MIN        480
@@ -253,7 +253,7 @@ static void apStart() {
     // call. A hang in there must end in a reset, never a dead unit, and the AP is never started at boot, so it cannot loop.
     gwStatus_watchdogKick();
     gwStatus_watchdogStretch();
-    WiFi.config("192.168.77.1", "255.255.255.0", "192.168.77.1");
+    WiFi.config("192.168.27.1", "255.255.255.0", "192.168.27.1");
     const int st = WiFi.beginAP(ssid, pass, AP_CHANNEL);
     gwStatus_watchdogRestore();
     gwStatus_watchdogKick();
@@ -393,11 +393,11 @@ static void pr(const char* fmt, ...) {
     if (k > 0) _probeLen = min(_probeLen + (size_t)k, sizeof(_probe) - 1);
 }
 
-// One request/answer on a fresh connection to 192.168.77.1:502. Returns bytes read; the first `keep` go to `buf`.
+// One request/answer on a fresh connection to 192.168.27.1:502. Returns bytes read; the first `keep` go to `buf`.
 static int exchange(const uint8_t* req, size_t reqLen, uint8_t* buf, size_t keep, uint32_t& ms) {
     WiFiClient c;
     const uint32_t t0 = millis();
-    if (!c.connect(IPAddress(192, 168, 77, 1), 502)) { ms = millis() - t0; return -1; }
+    if (!c.connect(IPAddress(192, 168, 27, 1), 502)) { ms = millis() - t0; return -1; }
     c.write(req, reqLen);
     int got = 0;
     const uint32_t t1 = millis();
@@ -485,7 +485,7 @@ void wifiAp_command(char** argv, int argc, bool armed, void (*emit)(const char*)
             stateName(), _lastErr[0] ? _lastErr : "-", _starts, _fails, _idleMin, _bridge ? 1 : 0, (unsigned long)_startMs,
             wifiAp_fwState());
 #if WIFIAP_RADIO
-        if (_ap == AP_ON) out(emit, "#DATA ap.ssid=%s ap.ip=192.168.77.1 ap.client=%d", WiFi.SSID(), WiFi.status() == WL_AP_CONNECTED ? 1 : 0);
+        if (_ap == AP_ON) out(emit, "#DATA ap.ssid=%s ap.ip=192.168.27.1 ap.client=%d", WiFi.SSID(), WiFi.status() == WL_AP_CONNECTED ? 1 : 0);
 #endif
         emit("#OK AP");
         return;

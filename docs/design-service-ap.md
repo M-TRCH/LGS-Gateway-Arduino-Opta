@@ -36,7 +36,7 @@ gateway's state and log, walks the modules, and sets the network. A laptop on th
 
 A separate HTTP listener does not fit, and the earlier plan's answer (stop the Modbus bridge) costs the site its server.
 So **the page is served on port 502 itself**: a Modbus TCP frame has protocol id 0 in bytes 2-3, an HTTP request starts
-with `GET `, so the first bytes of a request tell the two apart without doubt. The phone opens `http://192.168.77.1:502/`
+with `GET `, so the first bytes of a request tell the two apart without doubt. The phone opens `http://192.168.27.1:502/`
 (502 is not on any browser's blocked-port list). HTTP is answered only for clients on the AP subnet; on the LAN a
 `GET` gets no answer and the connection is closed (since 1.15 any client whose first bytes are not Modbus TCP is closed:
 draining and keeping it let a browser tab on the LAN hold a client slot). Every response is `Connection: close` and the page is one file with no favicon, so a
@@ -61,7 +61,7 @@ phone holds a slot for milliseconds.
   boot-button fix below first; that is a separate change.)
 - Refused unless `hw.wifi=1`, `wifi.fw=ok` and a password is set. `beginAP` is never called at boot.
 - Start runs from `loop()`, not from the console handler: kick, **stretch the IWDG to ~32.7 s**, pause NTP,
-  `WiFi.config(192.168.77.1/24)`, `WiFi.beginAP("LGS-<sys.name>", pass, 6)`, restore the watchdog to `sys.wdt_ms`, kick.
+  `WiFi.config(192.168.27.1/24)`, `WiFi.beginAP("LGS-<sys.name>", pass, 6)`, restore the watchdog to `sys.wdt_ms`, kick.
   A hang inside the driver is therefore a reset after 32 s, never a dead unit; and since the AP is never on at boot it
   cannot loop.
 - Off by: `AP OFF`, the panel action again, `min` minutes (default 30, at most 480) with no AP client, a reboot.
@@ -74,7 +74,7 @@ phone holds a slot for milliseconds.
 ### What an AP client may do
 - **Console page and the unit 255 tunnel**: always (the console's own HELLO gate still applies to writes).
 - **Modbus bridge to the modules** (any other unit): refused with exception 0x0A for AP clients unless `AP ON bridge=1`.
-- Told apart by the client's address (192.168.77.0/24). `net.ip` inside that subnet is refused by the validator.
+- Told apart by the client's address (192.168.27.0/24). `net.ip` inside that subnet is refused by the validator.
 
 ### The page (served on port 502 to AP clients)
 - `GET /` one inline HTML file (< 10 KB): **Status** (INFO), **Log** (LOG 20), **Modules** (SWEEP), **Network**
@@ -113,7 +113,7 @@ near the cabinet (`AP PROBE` on a second gateway does it end to end). `AP SCAN`,
 | D1 | `GET /` from the LAN | no answer, connection closed (`tcp_close p=1`) |
 | D2 | SWEEP over the console | 40/40 ok on Std-11 |
 | E | Overnight: AP on (min=480) + soak | 0 watchdog resets, `sys.up` grows, soak clean |
-| P | Morning, with a phone | joins, gets 192.168.77.x, page loads, Status/Log/Modules/Network work |
+| P | Morning, with a phone | joins, gets 192.168.27.x, page loads, Status/Log/Modules/Network work |
 
 ## Not in this change
 

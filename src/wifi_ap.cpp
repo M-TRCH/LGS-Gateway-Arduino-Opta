@@ -184,6 +184,8 @@ uint8_t wifiAp_fwData(uint32_t offset, const uint8_t* data, int len, uint32_t& r
 #define AP_PASS_KEY       "ap"
 #define AP_PASS_MIN       8
 #define AP_PASS_MAX       31
+#define AP_SSID_KEY       "apn"        // stored name; "-" (or nothing stored) = the default LGS-<sys.name>
+#define AP_SSID_MAX       31
 
 enum ApState : uint8_t { AP_OFF = 0, AP_STARTING = 1, AP_ON = 2, AP_FAILED = 3 };
 static ApState  _ap = AP_OFF;
@@ -211,6 +213,18 @@ static bool loadPass(char* out, size_t cap) {
     return true;
 }
 
+// The name the AP broadcasts: the stored one, else LGS-<sys.name>.
+static void apSsid(char* out, size_t cap) {
+    char n[AP_SSID_MAX + 2];
+    size_t len = 0;
+    if (gwStore_auxGet(AP_SSID_KEY, n, sizeof(n) - 1, &len) && len >= 1 && len <= AP_SSID_MAX && !(len == 1 && n[0] == '-')) {
+        n[len] = 0;
+        snprintf(out, cap, "%s", n);
+        return;
+    }
+    snprintf(out, cap, "LGS-%s", gwConfig_active().sys_name[0] ? gwConfig_active().sys_name : "gateway");
+}
+
 static const char* refuseReason() {
     if (!gwStatus_hasWifi()) return "no_radio";
     if (strcmp(wifiAp_fwState(), "ok") != 0) return "wifi_fw_not_installed";
@@ -232,7 +246,7 @@ static void apStart() {
     char pass[AP_PASS_MAX + 2];
     loadPass(pass, sizeof(pass));
     char ssid[40];
-    snprintf(ssid, sizeof(ssid), "LGS-%s", gwConfig_active().sys_name[0] ? gwConfig_active().sys_name : "gateway");
+    apSsid(ssid, sizeof(ssid));
     _ap = AP_STARTING;
     const uint32_t t0 = millis();
     // The driver loads the radio firmware from QSPI and brings the soft-AP and its DHCP server up: seconds, inside one
@@ -522,5 +536,17 @@ void wifiAp_command(char** argv, int argc, bool armed, void (*emit)(const char*)
         emit("#OK AP PASS stored=1");          // never echoed back
         return;
     }
-    emit("#ERR AP err=syntax want=STATUS|ON|OFF|PASS");
+    if (!strcasecmp(sub, "SSID")) {
+        if (argc != 2) { emit("#ERR AP err=syntax want=SSID_<1-31_chars_no_spaces>|default"); return; }
+        const char* p = !strcasecmp(argv[1], "default") ? "-" : argv[1];
+        const size_t n = strlen(p);
+        if (n < 1 || n > AP_SSID_MAX) { emit("#ERR AP err=range key=ssid allowed=1-31_chars"); return; }
+        for (size_t i = 0; i < n; i++) if (p[i] < 0x21 || p[i] > 0x7E) { emit("#ERR AP err=range key=ssid allowed=printable_no_spaces"); return; }
+        if (!gwStore_auxSet(AP_SSID_KEY, p, n)) { emit("#ERR AP err=storage"); return; }
+        char cur[40];
+        apSsid(cur, sizeof(cur));
+        out(emit, "#OK AP SSID stored=1 ssid=%s note=applies_at_next_AP_ON", cur);
+        return;
+    }
+    emit("#ERR AP err=syntax want=STATUS|ON|OFF|PASS|SSID");
 }

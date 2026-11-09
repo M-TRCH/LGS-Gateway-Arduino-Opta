@@ -102,7 +102,7 @@ $LGS RESYNC [0|1]             # volatile: broadcast re-sync + one retry after a 
 $LGS EXC [0|1]                # volatile: answer an RS485 timeout with Modbus exception 0x0B at once (default 0)
 $LGS AP [ON [min=N] [bridge=0|1] | OFF | PASS <8-31 chars> | SSID <1-31 chars>|default | MIN <1-480> | SHOW]   # service Wi-Fi AP (SSID default LGS-<sys.name>, applies at next ON); ON/OFF/PASS/SSID/MIN/SHOW need HELLO (MIN = stored default minutes, also for the panel button) (SHOW prints name+password)
 $LGS SWEEP START [ids=..|all] | STATUS | STOP                  # read-only module walk, no HELLO
-$LGS MOD <id> LIGHT|UNLOCK|OFF                                 # one coil to one module (needs HELLO; refused during a SWEEP); the service page's module buttons
+$LGS MOD <id> LIGHT|UNLOCK|OFF | FIND | <246|247> SETID <new>   # one coil to one module (HELLO; refused during a SWEEP); FIND = is a board waiting at 246/247 (no HELLO); SETID re-addresses ONLY a board at 246/247, as a loop() state machine (~6 s, MOD SETID STATUS); the service page uses all of it
 ```
 
 `LAMP`, `TIME` and `LOG` are deliberately **not** session-gated: none outlives its own timeout (LOG is read-only), and a clock that needs a session to correct is a clock that spends its life wrong. LOG kicks the watchdog per emitted line — the USB CDC blocks while a connected host is not reading, and a 100-line dump into a stalled terminal must not reset the gateway.

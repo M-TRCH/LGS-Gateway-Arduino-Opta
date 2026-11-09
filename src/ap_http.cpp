@@ -26,7 +26,7 @@ nav button.on{background:var(--brand);color:#fff;border-color:transparent}main{p
 .t{width:100%;border-collapse:collapse;font-size:13px}.t td,.t th{padding:5px 6px;border-bottom:1px solid var(--s2);text-align:left}.t th{color:var(--mut);font-weight:600}
 .tag{display:inline-block;padding:1px 8px;border-radius:99px;font-size:12px;background:var(--s2)}.ok{color:var(--ok)}.slow{color:var(--warn)}.silent{color:var(--bad)}
 label{display:block;font-size:13px;color:var(--mut);margin-top:8px}input,select{width:100%;padding:9px;border:1px solid var(--line);border-radius:8px;font:inherit;background:#fff;color:var(--ink)}
-.b{margin-top:10px;width:100%;padding:11px;border:0;border-radius:10px;background:var(--brand);color:#fff;font:inherit;font-weight:600}.b.r{background:var(--bad)}.act{display:flex;gap:6px}.act .b{margin:0}#mt tr{cursor:pointer}#mt tr.sel td{background:var(--s2)}.m{color:var(--mut);font-size:13px}
+.b{margin-top:10px;width:100%;padding:11px;border:0;border-radius:10px;background:var(--brand);color:#fff;font:inherit;font-weight:600}.b.r{background:var(--bad)}.nrow{display:flex;gap:6px;align-items:center;margin:6px 0}.nrow span{flex:1}.ni{width:88px}.nrow .b{margin:0;width:auto;padding:9px 12px}.act{display:flex;gap:6px}.act .b{margin:0}#mt tr{cursor:pointer}#mt tr.sel td{background:var(--s2)}.m{color:var(--mut);font-size:13px}
 </style></head><body>
 <header><span id="h">LGS service</span><small id="hv"></small></header>
 <nav><button data-t="g" class="on">เกตเวย์</button><button data-t="e">เหตุการณ์</button><button data-t="m">โมดูล</button></nav>
@@ -34,10 +34,10 @@ label{display:block;font-size:13px;color:var(--mut);margin-top:8px}input,select{
 <section id="g"><div class="card"><h3>สถานะ</h3><div class="kv" id="gs">...</div></div>
 <div class="card"><h3>ตั้งค่า</h3><div id="gf"></div><button class="b" id="sv">บันทึกการตั้งค่า</button><button class="b r" id="rb">รีบูตเกตเวย์</button><div class="m" id="go"></div></div></section>
 <section id="e" hidden><div class="card"><select id="ef"><option value="">ทุกชนิด</option></select><div class="m" id="en"></div><table class="t"><tbody id="et"></tbody></table></div></section>
-<section id="m" hidden><div class="card" id="mc" hidden><h3 id="mh"></h3><div class="act"><button class="b" data-c="LIGHT">เปิดไฟ</button><button class="b" data-c="UNLOCK">ปลดล็อก</button><button class="b r" data-c="OFF">ดับไฟ</button></div><div class="m" id="mo"></div></div><div class="card"><div class="m" id="ms"></div><table class="t"><thead><tr><th>ID</th><th>ชนิด</th><th>เฟิร์มแวร์</th><th>สถานะ</th></tr></thead><tbody id="mt"></tbody></table><button class="b" id="mb">อ่านโมดูลอีกครั้ง</button></div></section>
+<section id="m" hidden><div class="card" id="mc" hidden><h3 id="mh"></h3><div class="act"><button class="b" data-c="LIGHT">เปิดไฟ</button><button class="b" data-c="UNLOCK">ปลดล็อก</button><button class="b r" data-c="OFF">ดับไฟ</button></div><div class="m" id="mo"></div></div><div class="card"><h3>บอร์ดใหม่ (ไอดี 246 / 247)</h3><div id="nb" class="m">กดค้นหาเพื่อดูบอร์ดที่ยังไม่มีไอดีประจำตำแหน่ง</div><div class="m" id="nm"></div><button class="b" id="nf">ค้นหาบอร์ดใหม่</button></div><div class="card"><div class="m" id="ms"></div><table class="t"><thead><tr><th>ID</th><th>ชนิด</th><th>เฟิร์มแวร์</th><th>สถานะ</th></tr></thead><tbody id="mt"></tbody></table><button class="b" id="mb">อ่านโมดูลอีกครั้ง</button></div></section>
 </main><script>
 const K=["sys.name","net.dhcp","net.ip","net.mask","net.gw","net.dns","net.ntp","time.tz_min"],$=i=>document.getElementById(i),TY={10:"STANDARD",20:"NARCOTIC",30:"LITE",40:"DELIVERY"};
-let EV=[],CUR="g",MS=0,SEL=0;
+let EV=[],CUR="g",MS=0,SEL=0,NF=0;
 async function cmd(l){const r=await fetch("/api?l="+encodeURIComponent(l),{cache:"no-store"});return r.text()}
 function kv(s){const o={};s.split(" ").forEach(p=>{const i=p.indexOf("=");if(i>0)o[p.slice(0,i)]=p.slice(i+1)});return o}
 function rows(t){return t.split("\n").filter(l=>l.startsWith("#DATA ")).map(l=>kv(l.slice(6)))}
@@ -65,11 +65,25 @@ $("ef").onchange=showEv;
 function paintMods(t){const L=t.split("\n"),h=kv((L.find(l=>l.startsWith("#DATA state="))||"").slice(6)),r=rows(t).filter(x=>x.id);
  $("ms").textContent=(h.state==="running"?"กำลังอ่าน ":"อ่านแล้ว ")+(h.done||0)+"/"+(h.total||0)+" · ปกติ "+(h.ok||0)+" · ช้า "+(h.slow||0)+" · เงียบ "+(h.silent||0);
  $("mt").innerHTML=r.map(x=>"<tr data-id="+x.id+(x.id==SEL?" class=sel":"")+"><td>"+x.id+"</td><td>"+(x.st==="silent"?"-":TY[x.ty]||x.ty)+"</td><td>"+(x.st==="silent"?"-":fw(x.fw))+"</td><td class="+x.st+">"+({ok:"ปกติ",slow:"ช้า",silent:"เงียบ"}[x.st]||x.st)+"</td></tr>").join("");
+ if(h.state!=="running"&&!NF){NF=1;findNew()}
  if(h.state==="running"&&CUR==="m")setTimeout(async()=>{if(CUR==="m")paintMods(await cmd("SWEEP STATUS"))},1200)}
 $("mt").onclick=e=>{const r=e.target.closest("tr");if(!r)return;SEL=+r.dataset.id;$("mc").hidden=false;$("mh").textContent="โมดูล "+SEL;$("mo").textContent="";
  document.querySelectorAll("#mt tr").forEach(x=>x.classList.toggle("sel",x===r))};
 document.querySelectorAll(".act .b").forEach(b=>b.onclick=async()=>{const c=b.dataset.c;if(c==="UNLOCK"&&!confirm("ปลดล็อกโมดูล "+SEL+"?"))return;
  const h=await cmd("HELLO web");if(!h.includes("#OK")){$("mo").textContent=h;return}$("mo").textContent=(await cmd("MOD "+SEL+" "+c)).replace(/#/g,"")});
+const NE={no_board_at_source_id:"ไม่พบบอร์ดที่ไอดีนี้",new_id_already_used:"ไอดีใหม่ถูกใช้โดยโมดูลอื่นแล้ว",write_failed:"เขียนไอดีไม่สำเร็จ",readback_mismatch:"อ่านกลับแล้วไม่ตรง",rejected_when_saved:"โมดูลไม่รับไอดีใหม่ตอนบันทึก",no_answer_after_reboot:"โมดูลไม่ตอบหลังรีบูต"};
+async function findNew(){$("nm").textContent="";const t=await cmd("MOD FIND");if(t.includes("#ERR")){$("nb").textContent="ตู้กำลังทำงานอื่นอยู่ ลองใหม่อีกครั้ง";return}
+ const r=rows(t).filter(x=>x.found==="1");
+ $("nb").innerHTML=r.length?r.map(x=>'<div class="nrow"><span>ไอดี '+x.id+' · '+fw(x.fw)+'</span><input class="ni" inputmode="numeric" placeholder="ไอดีใหม่"><button class="b" data-f="'+x.id+'">เปลี่ยนไอดี</button></div>').join(""):"ไม่พบบอร์ดที่ไอดี 246 / 247"}
+$("nf").onclick=findNew;
+$("nb").onclick=async e=>{const b=e.target.closest("button[data-f]");if(!b)return;const f=b.dataset.f,n=b.parentElement.querySelector(".ni").value.trim();
+ if(!/^\d+$/.test(n)||!((+n>=1&&+n<=245)||+n===247)||n===f){$("nm").textContent="ไอดีใหม่ต้องเป็น 1-245 หรือ 247";return}
+ if(!confirm("เปลี่ยนไอดี "+f+" เป็น "+n+"? โมดูลจะรีบูต"))return;
+ const h=await cmd("HELLO web");if(!h.includes("#OK")){$("nm").textContent=h;return}
+ const o=await cmd("MOD "+f+" SETID "+n);if(!o.includes("#OK")){$("nm").textContent=o.replace(/#/g,"");return}
+ $("nm").textContent="กำลังเปลี่ยนไอดี (ราว 6 วินาที)...";let st={};
+ for(let i=0;i<30;i++){await new Promise(r=>setTimeout(r,1000));st=Object.assign({},...rows(await cmd("MOD SETID STATUS")));if(st.state!=="running")break}
+ $("nm").textContent=st.state==="ok"?"เปลี่ยนเป็นไอดี "+n+" แล้ว":"ไม่สำเร็จ: "+(NE[st.msg]||st.msg||"หมดเวลา");findNew().then(()=>{if(st.state==="ok")$("nm").textContent="เปลี่ยนเป็นไอดี "+n+" แล้ว"});MS=0};
 $("mb").onclick=async()=>{await cmd("SWEEP START");MS=1;setTimeout(async()=>paintMods(await cmd("SWEEP STATUS")),600)};
 $("sv").onclick=async()=>{const h=await cmd("HELLO web");if(!h.includes("#OK")){$("go").textContent=h;return}
  const s=K.map(k=>k+"="+$("k_"+k).value.trim()).filter(p=>!p.endsWith("=")).join(" ");$("go").textContent=(await cmd("SET "+s))+(await cmd("SAVE"))};

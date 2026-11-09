@@ -16,46 +16,61 @@
 static const char PAGE[] = R"HTML(<!doctype html><html lang="th"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,">
 <title>LGS service</title><style>
-:root{--bg:#e6f2f7;--card:#fff;--ink:#0d2b3a;--mut:#46697a;--line:#bcd6e2;--brand:#0a7ea4;--ok:#0f8a4f;--warn:#9a6700;--bad:#c62828}
-*{box-sizing:border-box}body{margin:0;font:15px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--bg);color:var(--ink)}
-header{background:var(--brand);color:#fff;padding:12px 16px;font-weight:600}nav{display:flex;gap:6px;padding:10px 12px;flex-wrap:wrap}
-nav button{flex:1;min-width:72px;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--card);font:inherit}
-nav button.on{background:var(--brand);color:#fff;border-color:transparent}main{padding:0 12px 24px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px;margin-bottom:12px}
-pre{white-space:pre-wrap;word-break:break-all;font:12px/1.4 ui-monospace,Consolas,monospace;margin:0}
-.grid{display:grid;grid-template-columns:repeat(8,1fr);gap:4px}.c{padding:6px 0;text-align:center;border-radius:6px;font-size:12px;background:#eee}
-.ok{background:#dff5e8;color:var(--ok)}.slow{background:#fff1cc;color:var(--warn)}.silent{background:#fde0e0;color:var(--bad)}
-label{display:block;font-size:13px;color:var(--mut);margin-top:8px}input,select{width:100%;padding:9px;border:1px solid var(--line);border-radius:8px;font:inherit}
-.b{margin-top:10px;width:100%;padding:11px;border:0;border-radius:10px;background:var(--brand);color:#fff;font:inherit;font-weight:600}
-.b.r{background:var(--bad)}.m{color:var(--mut);font-size:13px}</style></head><body>
-<header id="h">LGS service</header>
-<nav><button data-t="s" class="on">สถานะ</button><button data-t="l">บันทึก</button><button data-t="m">โมดูล</button><button data-t="n">เครือข่าย</button></nav>
+:root{--bg:#e6f2f7;--card:#fff;--ink:#0d2b3a;--mut:#46697a;--line:#bcd6e2;--s2:#d9ebf3;--brand:#0a7ea4;--ok:#0f8a4f;--warn:#9a6700;--bad:#c62828}
+*{box-sizing:border-box}body{margin:0;font:15px/1.5 system-ui,-apple-system,"Segoe UI","Noto Sans Thai","Leelawadee UI",Tahoma,sans-serif;background:var(--bg);color:var(--ink)}
+header{background:var(--brand);color:#fff;padding:12px 16px;font-weight:600;display:flex;justify-content:space-between;gap:8px}header small{font-weight:400;opacity:.85}
+nav{display:flex;gap:6px;padding:10px 12px}nav button{flex:1;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink);font:inherit}
+nav button.on{background:var(--brand);color:#fff;border-color:transparent}main{padding:0 12px 24px;max-width:760px;margin:auto}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px;margin-bottom:12px}h3{margin:0 0 8px;font-size:14px;color:var(--mut);font-weight:600}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;font-size:14px}.kv b{font-weight:400;color:var(--mut)}.kv span{word-break:break-all}
+.t{width:100%;border-collapse:collapse;font-size:13px}.t td,.t th{padding:5px 6px;border-bottom:1px solid var(--s2);text-align:left}.t th{color:var(--mut);font-weight:600}
+.tag{display:inline-block;padding:1px 8px;border-radius:99px;font-size:12px;background:var(--s2)}.ok{color:var(--ok)}.slow{color:var(--warn)}.silent{color:var(--bad)}
+label{display:block;font-size:13px;color:var(--mut);margin-top:8px}input,select{width:100%;padding:9px;border:1px solid var(--line);border-radius:8px;font:inherit;background:#fff;color:var(--ink)}
+.b{margin-top:10px;width:100%;padding:11px;border:0;border-radius:10px;background:var(--brand);color:#fff;font:inherit;font-weight:600}.b.r{background:var(--bad)}.m{color:var(--mut);font-size:13px}
+</style></head><body>
+<header><span id="h">LGS service</span><small id="hv"></small></header>
+<nav><button data-t="g" class="on">เกตเวย์</button><button data-t="e">เหตุการณ์</button><button data-t="m">โมดูล</button></nav>
 <main>
-<section id="s" class="card"><pre id="so">...</pre></section>
-<section id="l" class="card" hidden><pre id="lo">...</pre></section>
-<section id="m" class="card" hidden><div class="m" id="ms">กดเริ่มเพื่อไล่ทุกโมดูล</div><div class="grid" id="mg"></div><button class="b" id="mb">เริ่มไล่โมดูล</button></section>
-<section id="n" class="card" hidden><div id="nf"></div><button class="b" id="nb">บันทึกการตั้งค่า</button><button class="b r" id="rb">รีบูตเกตเวย์</button><pre id="no" class="m"></pre></section>
+<section id="g"><div class="card"><h3>สถานะ</h3><div class="kv" id="gs">...</div></div>
+<div class="card"><h3>ตั้งค่า</h3><div id="gf"></div><button class="b" id="sv">บันทึกการตั้งค่า</button><button class="b r" id="rb">รีบูตเกตเวย์</button><div class="m" id="go"></div></div></section>
+<section id="e" hidden><div class="card"><select id="ef"><option value="">ทุกชนิด</option></select><div class="m" id="en"></div><table class="t"><tbody id="et"></tbody></table></div></section>
+<section id="m" hidden><div class="card"><div class="m" id="ms"></div><table class="t"><thead><tr><th>ID</th><th>ชนิด</th><th>เฟิร์มแวร์</th><th>สถานะ</th></tr></thead><tbody id="mt"></tbody></table><button class="b" id="mb">อ่านโมดูลอีกครั้ง</button></div></section>
 </main><script>
-const K=["sys.name","net.dhcp","net.ip","net.mask","net.gw","net.dns","net.ntp"];
+const K=["sys.name","net.dhcp","net.ip","net.mask","net.gw","net.dns","net.ntp","time.tz_min"],$=i=>document.getElementById(i),TY={10:"STANDARD",20:"NARCOTIC",30:"LITE",40:"DELIVERY"};
+let EV=[],CUR="g",MS=0;
 async function cmd(l){const r=await fetch("/api?l="+encodeURIComponent(l),{cache:"no-store"});return r.text()}
-function kv(t){const o={};t.split("\n").forEach(x=>{if(x.startsWith("#OK GET "))x="#DATA "+x.slice(8);else if(!x.startsWith("#DATA"))return;x.slice(6).split(" ").forEach(p=>{const i=p.indexOf("=");if(i>0)o[p.slice(0,i)]=p.slice(i+1)})});return o}
-const $=i=>document.getElementById(i);
+function kv(s){const o={};s.split(" ").forEach(p=>{const i=p.indexOf("=");if(i>0)o[p.slice(0,i)]=p.slice(i+1)});return o}
+function rows(t){return t.split("\n").filter(l=>l.startsWith("#DATA ")).map(l=>kv(l.slice(6)))}
+function fw(n){n=+n;return n>=10000?"v"+Math.floor(n/10000)+"."+Math.floor(n/100)%100+"."+n%100:"รุ่นเก่า"}
+function up(s){s=+s;const d=Math.floor(s/86400),h=Math.floor(s/3600)%24,m=Math.floor(s/60)%60;return (d?d+" วัน ":"")+h+" ชม. "+m+" นาที"}
+function line(a){return a.map(x=>"<b>"+x[0]+"</b><span>"+x[1]+"</span>").join("")}
 document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{document.querySelectorAll("nav button").forEach(x=>x.classList.toggle("on",x===b));
- ["s","l","m","n"].forEach(i=>$(i).hidden=i!==b.dataset.t);load(b.dataset.t)});
-async function load(t){try{if(t==="s"){const x=await cmd("INFO");$("so").textContent=x.replace(/#DATA /g,"");const o=kv(x);$("h").textContent="LGS service · "+(o["sys.name"]||"")+" · fw "+(o.fw||"")}
- if(t==="l"){$("lo").textContent=(await cmd("LOG 20")).replace(/#DATA /g,"")}
- if(t==="n"){const o={};for(const k of K){const r=kv(await cmd("GET "+k));Object.assign(o,r)}
-  $("nf").innerHTML=K.map(k=>'<label>'+k+'</label><input id="k_'+k+'" value="'+(o[k]||"").replace(/"/g,"")+'">').join("")}
+ CUR=b.dataset.t;["g","e","m"].forEach(i=>$(i).hidden=i!==CUR);load()});
+async function load(){try{
+ if(CUR==="g"){const o=Object.assign({},...rows(await cmd("INFO")));
+  $("h").textContent=o["sys.name"]||"LGS service";$("hv").textContent="fw "+(o.fw||"");
+  $("gs").innerHTML=line([["เปิดมาแล้ว",up(o["sys.up"])],["เครือข่าย",(o["net.state"]||"")+" · "+(o["net.ip"]||"")],["ไคลเอนต์ TCP",o["net.client"]||0],
+   ["เวลา",(o["time.now"]||"").replace("T"," ")+(o["time.set"]==="1"?"":" (ยังไม่ตั้ง)")],["รีเซตตู้",o["sched.reset"]||"-"],
+   ["RS485 ตอบ / ไม่ตอบ",(o["cnt.rs485_ok"]||0)+" / "+(o["cnt.rs485_timeout"]||0)],["USB / TCP",(o["cnt.usb_ok"]||0)+" / "+(o["cnt.tcp_ok"]||0)],
+   ["รีเซตล่าสุดเพราะ",o["sys.reset"]||"-"],["MAC",o.mac||"-"],["บันทึกเหตุการณ์",(o["log.state"]||"")+" · "+(o["log.n"]||0)+" รายการ"]]);
+  if(!$("gf").children.length){const v={};for(const k of K)Object.assign(v,kv((await cmd("GET "+k)).replace(/^#OK GET /,"")));
+   $("gf").innerHTML=K.map(k=>'<label>'+k+'</label><input id="k_'+k+'" value="'+(v[k]||"").replace(/"/g,"")+'">').join("")}}
+ if(CUR==="e"){const t=await cmd("LOG 60");EV=rows(t);const s=$("ef"),cur=s.value,ty=[...new Set(EV.map(r=>r.ev))].sort();
+  s.innerHTML='<option value="">ทุกชนิด</option>'+ty.map(x=>'<option'+(x===cur?" selected":"")+'>'+x+'</option>').join("");showEv()}
+ if(CUR==="m"){let t=await cmd("SWEEP STATUS");if(t.includes("state=idle")||!MS){await cmd("SWEEP START");MS=1;t=await cmd("SWEEP STATUS")}paintMods(t)}
 }catch(e){}}
-async function sweep(){const x=await cmd("SWEEP STATUS"),rows=x.split("\n").filter(l=>l.startsWith("#DATA id="));const h=kv(x.split("\n")[0]);
- $("ms").textContent=(h.state||"")+" "+(h.done||0)+"/"+(h.total||0)+" · ok "+(h.ok||0)+" · ช้า "+(h.slow||0)+" · เงียบ "+(h.silent||0);
- $("mg").innerHTML=rows.map(r=>{const o={};r.slice(6).split(" ").forEach(p=>{const i=p.indexOf("=");o[p.slice(0,i)]=p.slice(i+1)});return '<div class="c '+o.st+'">'+o.id+'</div>'}).join("");
- if(h.state==="running")setTimeout(sweep,1000)}
-$("mb").onclick=async()=>{await cmd("SWEEP START");setTimeout(sweep,500)};
-$("nb").onclick=async()=>{const h=await cmd("HELLO web");if(!h.includes("#OK")){$("no").textContent=h;return}
- const s=K.map(k=>k+"="+$("k_"+k).value.trim()).filter(p=>!p.endsWith("=")).join(" ");let out=await cmd("SET "+s);out+=await cmd("SAVE");$("no").textContent=out};
-$("rb").onclick=async()=>{if(!confirm("รีบูตเกตเวย์? AP จะปิด ต้องเปิดใหม่หลังบูต"))return;await cmd("HELLO web");$("no").textContent=await cmd("REBOOT")};
-load("s");
+function showEv(){const f=$("ef").value,l=EV.filter(r=>!f||r.ev===f);$("en").textContent="ล่าสุด "+l.length+" รายการ";
+ $("et").innerHTML=l.map(r=>"<tr><td>"+(r.t||"-").replace("T","<br>")+"</td><td><span class=tag>"+r.ev+"</span></td><td>"+r.a+" / "+r.p+"</td></tr>").join("")}
+$("ef").onchange=showEv;
+function paintMods(t){const L=t.split("\n"),h=kv((L.find(l=>l.startsWith("#DATA state="))||"").slice(6)),r=rows(t).filter(x=>x.id);
+ $("ms").textContent=(h.state==="running"?"กำลังอ่าน ":"อ่านแล้ว ")+(h.done||0)+"/"+(h.total||0)+" · ปกติ "+(h.ok||0)+" · ช้า "+(h.slow||0)+" · เงียบ "+(h.silent||0);
+ $("mt").innerHTML=r.map(x=>"<tr><td>"+x.id+"</td><td>"+(x.st==="silent"?"-":TY[x.ty]||x.ty)+"</td><td>"+(x.st==="silent"?"-":fw(x.fw))+"</td><td class="+x.st+">"+({ok:"ปกติ",slow:"ช้า",silent:"เงียบ"}[x.st]||x.st)+"</td></tr>").join("");
+ if(h.state==="running"&&CUR==="m")setTimeout(async()=>{if(CUR==="m")paintMods(await cmd("SWEEP STATUS"))},1200)}
+$("mb").onclick=async()=>{await cmd("SWEEP START");MS=1;setTimeout(async()=>paintMods(await cmd("SWEEP STATUS")),600)};
+$("sv").onclick=async()=>{const h=await cmd("HELLO web");if(!h.includes("#OK")){$("go").textContent=h;return}
+ const s=K.map(k=>k+"="+$("k_"+k).value.trim()).filter(p=>!p.endsWith("=")).join(" ");$("go").textContent=(await cmd("SET "+s))+(await cmd("SAVE"))};
+$("rb").onclick=async()=>{if(!confirm("รีบูตเกตเวย์? AP จะปิด ต้องเปิดใหม่หลังบูต"))return;await cmd("HELLO web");$("go").textContent=await cmd("REBOOT")};
+load();
 </script></body></html>)HTML";
 
 static char _out[OUT_MAX];
